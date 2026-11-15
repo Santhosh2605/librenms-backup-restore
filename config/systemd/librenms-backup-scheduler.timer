@@ -1,0 +1,14 @@
+[Unit]
+Description=LibreNMS Backup & Restore scheduler (daily/weekly/monthly)
+Documentation=file:/opt/librenms-backup-restore/docs/SCHEDULER.md
+
+[Timer]
+# Runs every minute and lets br.worker decide whether a schedule is due.
+# This is independent of the LibreNMS scheduler/poller units.
+OnCalendar=*:0/1
+AccuracySec=30s
+Persistent=true
+Unit=librenms-backup-scheduler.service
+
+[Install]
+WantedBy=timers.target

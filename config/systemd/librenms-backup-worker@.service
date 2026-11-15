@@ -1,0 +1,28 @@
+[Unit]
+Description=LibreNMS Backup & Restore worker job %i
+Documentation=file:/opt/librenms-backup-restore/docs/ARCHITECTURE.md
+After=mariadb.service br-helper.service
+Requires=br-helper.service
+# A restore intentionally stops Apache/php-fpm; do not couple to them here.
+
+[Service]
+Type=oneshot
+User=librenms
+Group=librenms
+Environment=BR_CONF=/etc/librenms-backup/br.conf
+Environment=PYTHONPATH=/opt/librenms-backup-restore/worker
+WorkingDirectory=/opt/librenms-backup-restore/worker
+# Instance name is the job UUID; the worker resolves kind/params from the DB.
+ExecStart=/usr/bin/python3 -m br.worker run-job --job %i
+TimeoutStartSec=8h
+# Never let a failed job take the whole stack down.
+SuccessExitStatus=0 1 3 130
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/var/backups/librenms /var/log/librenms-backup /var/lib/librenms-backup /run/librenms-backup
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

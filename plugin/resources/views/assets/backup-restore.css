@@ -1,0 +1,217 @@
+/*
+ * LibreNMS Backup & Restore - plugin styles.
+ *
+ * Scoped to .br-app / .br-* so nothing leaks into the LibreNMS theme.
+ * Uses the same neutral palette as LibreNMS v1 layout (Bootstrap 3) and is
+ * dark-mode safe because colours are defined as CSS variables.
+ */
+
+.br-app {
+    --br-bg: #ffffff;
+    --br-border: #d7d7d7;
+    --br-muted: #6b7280;
+    --br-text: #1f2937;
+    --br-accent: #2a6ebb;
+    --br-ok: #3c9a5f;
+    --br-bad: #c0392b;
+    --br-warn: #b8860b;
+    --br-radius: 4px;
+    font-size: 13px;
+    color: var(--br-text);
+    padding: 0 15px 30px 15px;
+}
+
+.br-app * { box-sizing: border-box; }
+
+.br-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 0 10px;
+    border-bottom: 2px solid var(--br-border);
+    flex-wrap: wrap;
+}
+.br-header h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.br-header .br-sub { margin: 4px 0 0; color: var(--br-muted); font-size: 12px; }
+.br-header-actions { display: flex; gap: 8px; align-items: center; }
+
+.br-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0 0 0 0;
+    border-bottom: 1px solid var(--br-border);
+}
+.br-tabs li { margin: 0; }
+.br-tabs li a {
+    display: block;
+    padding: 8px 13px;
+    color: var(--br-muted);
+    text-decoration: none;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--br-radius) var(--br-radius) 0 0;
+    cursor: pointer;
+    font-size: 12.5px;
+}
+.br-tabs li a:hover { color: var(--br-accent); background: rgba(42, 110, 187, 0.06); }
+.br-tabs li.active a {
+    color: var(--br-text);
+    background: var(--br-bg);
+    border-color: var(--br-border);
+    font-weight: 600;
+    margin-bottom: -1px;
+}
+
+.br-panel { padding: 16px 0; }
+
+.br-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+.br-card {
+    border: 1px solid var(--br-border);
+    border-left: 3px solid var(--br-accent);
+    border-radius: var(--br-radius);
+    padding: 11px 13px;
+    background: var(--br-bg);
+}
+.br-card.warn { border-left-color: var(--br-warn); }
+.br-card.danger { border-left-color: var(--br-bad); }
+.br-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--br-muted); }
+.br-card-value { font-size: 20px; font-weight: 600; margin-top: 3px; word-break: break-word; }
+.br-card-sub { font-size: 11.5px; color: var(--br-muted); margin-top: 3px; }
+
+.br-section {
+    border: 1px solid var(--br-border);
+    border-radius: var(--br-radius);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    background: var(--br-bg);
+}
+.br-section h4 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.br-sub { color: var(--br-muted); font-size: 12px; }
+
+.br-kv { list-style: none; margin: 0; padding: 0; }
+.br-kv li { padding: 3px 0; font-size: 12.5px; }
+
+.br-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.br-progress { margin: 8px 0; }
+.br-progress-label { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--br-muted); margin-bottom: 3px; }
+.br-progress-track { height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
+.br-progress-fill { height: 100%; background: var(--br-accent); transition: width .4s ease; }
+
+.br-log {
+    background: #1e1e1e;
+    color: #d8d8d8;
+    padding: 10px 12px;
+    border-radius: var(--br-radius);
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.45;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 8px 0 0;
+}
+
+.br-table { font-size: 12.5px; margin-bottom: 0; }
+.br-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--br-muted); font-weight: 600; }
+.br-actions { white-space: nowrap; }
+.br-actions .btn { margin-right: 3px; }
+.br-ellipsis { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.br-status {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    background: #eef1f5;
+    color: #4b5563;
+}
+.br-status-completed, .br-status-verified { background: #e5f5ec; color: var(--br-ok); }
+.br-status-running, .br-status-queued { background: #e8f0fb; color: var(--br-accent); }
+.br-status-failed { background: #fdeceb; color: var(--br-bad); }
+.br-status-pending, .br-status-unverified { background: #fdf5e3; color: var(--br-warn); }
+.br-lock { color: var(--br-ok); margin-left: 5px; }
+
+.br-mini-bar { height: 3px; background: #e9ecef; border-radius: 2px; margin-top: 4px; width: 90px; }
+.br-mini-fill { height: 100%; background: var(--br-accent); border-radius: 2px; }
+
+.br-warning {
+    border: 1px solid #f0c36d;
+    background: #fdf8e8;
+    color: #7a5c11;
+    border-radius: var(--br-radius);
+    padding: 10px 13px;
+    margin-bottom: 16px;
+    font-size: 12.5px;
+}
+
+.br-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px 16px; align-items: end; }
+.br-field label { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--br-muted); margin-bottom: 4px; font-weight: 600; }
+.br-form button[type="submit"] { grid-column: 1 / -1; justify-self: start; }
+
+.br-checklist { list-style: none; padding: 0; margin: 0; }
+.br-checklist li { padding: 4px 0; font-size: 12.5px; }
+.br-checklist li i { width: 16px; }
+.br-checklist li.ok i { color: var(--br-ok); }
+.br-checklist li.bad i { color: var(--br-bad); }
+.br-checklist li.bad { color: var(--br-bad); }
+
+.br-loading { text-align: center; padding: 40px 0; color: var(--br-muted); }
+
+.br-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20000;
+    padding: 16px;
+}
+.br-modal {
+    background: #fff;
+    border-radius: 6px;
+    padding: 18px 20px;
+    max-width: 620px;
+    width: 100%;
+    max-height: 85vh;
+    overflow: auto;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+    font-size: 13px;
+}
+.br-modal h4 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+.br-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.br-confirm-hint { margin: 12px 0 4px; font-size: 12.5px; }
+
+/* Dark mode: LibreNMS sets .dark on <html> in its v1 skin. */
+.dark .br-app {
+    --br-bg: #23262b;
+    --br-border: #3a3f46;
+    --br-muted: #9aa3ad;
+    --br-text: #e4e7eb;
+}
+.dark .br-card, .dark .br-section { background: var(--br-bg); }
+.dark .br-modal { background: #23262b; color: #e4e7eb; }
+.dark .br-tabs li.active a { background: var(--br-bg); }
+.dark .br-progress-track, .dark .br-mini-bar { background: #3a3f46; }
+.dark .br-status { background: #32363c; color: #c9cfd6; }
+.dark .br-warning { background: #3a3421; border-color: #6b5c22; color: #e8d9a8; }
+.dark .br-table > tbody > tr > td { border-color: #3a3f46; }
+
+@media (max-width: 640px) {
+    .br-header { flex-direction: column; align-items: stretch; }
+    .br-card-value { font-size: 17px; }
+}

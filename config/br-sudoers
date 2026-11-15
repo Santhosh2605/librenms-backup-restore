@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# LibreNMS Backup & Restore - privilege model
+#
+# Install to: /etc/sudoers.d/librenms-backup      (root:root 0440)
+# Validate : visudo -c -f /etc/sudoers.d/librenms-backup
+#
+# WHO NEEDS ROOT
+# --------------
+#   * PHP-FPM / Apache : NOTHING. The web tier writes database rows only.
+#
+#     This is deliberate. Historically, backup plugins grant the web server
+#     sudo rights; that turns any PHP RCE into root. Here the web tier has no
+#     entry in this file at all, so an exploited PHP-FPM cannot escalate.
+#
+#   * The `librenms` user (worker): exactly ONE command, no arguments, and that
+#     command can only speak a closed JSON protocol to a root daemon:
+#
+#         sudo -n /usr/local/libexec/librenms-backup/br-helper
+#
+#     Filesystem, service and database operations are requested over a unix
+#     socket; the helper validates every field, never invokes a shell, and
+#     restricts paths to an allowlist.
+#
+#   * Installer runs as root and is idempotent (scripts/install.sh).
+# ---------------------------------------------------------------------------
+
+Defaults:librenms !requiretty
+Defaults:librenms env_reset
+Defaults:librenms secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults:librenms !logfile
+
+# The single escalation path for the worker.  NOEXEC would break the helper's
+# own exec of mariadb-dump/systemctl, so it is intentionally not used; instead
+# the helper validates argv itself.
+librenms ALL=(root) NOPASSWD: /usr/local/libexec/librenms-backup/br-helper
+
+# Read-only diagnostics the worker needs without root (no wildcards, exact argv).
+Cmnd_Alias BR_DIAG = /usr/bin/df -P /var/backups/librenms, \
+                     /usr/bin/du -sb /var/backups/librenms, \
+                     /usr/bin/systemctl is-active librenms-backup-scheduler.timer
+
+librenms ALL=(root) NOPASSWD: BR_DIAG

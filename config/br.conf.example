@@ -1,0 +1,157 @@
+# ---------------------------------------------------------------------------
+# LibreNMS Backup & Restore - worker configuration
+#
+# Install to: /etc/librenms-backup/br.conf   (root:librenms 0640)
+#
+# This file is parsed with Python's configparser. It is read ONLY by the
+# worker (runs as the `librenms` user) and the privileged helper
+# (br-helper, invoked via a single narrowly scoped sudo rule).
+#
+# NEVER put encryption keys, database passwords or APP_KEY in this file.
+# Those live in:
+#   /etc/librenms-backup/keys/master.key   (root:librenms 0640)
+#   base64 wrapped by `age` for S3/offsite copies (optional)
+# ---------------------------------------------------------------------------
+
+[general]
+# Absolute paths only. Must match the values used at install time.
+librenms_root      = /opt/librenms
+backup_root        = /var/backups/librenms
+staging_dir        = /var/backups/librenms/staging
+archive_dir        = /var/backups/librenms/archives
+checkpoint_dir     = /var/backups/librenms/recovery-checkpoints
+run_dir            = /run/librenms-backup
+state_dir          = /var/lib/librenms-backup
+log_dir            = /var/log/librenms-backup
+
+# LibreNMS application user/group. Ownership of restored trees.
+librenms_user      = librenms
+librenms_group     = librenms
+
+# Refuse to start a backup if the free space on backup_root drops below this
+# many MiB, or if projected archive size would leave less than headroom_mib.
+min_free_mib       = 1024
+headroom_mib       = 512
+
+# Maximum number of completed backup jobs kept in the staging area.
+max_parallel_jobs  = 1
+
+[archive]
+# zstd | gzip   (zstd strongly recommended)
+compression        = zstd
+# zstd level 1-19 (3 is a good bandwidth/space tradeoff)
+zstd_level         = 3
+gzip_level         = 6
+
+# age | openssl-sshaes | none
+#
+#   age            X25519 + ChaCha20-Poly1305 (recommended; needs the age binary)
+#   openssl-sshaes AES-256-CTR + HMAC-SHA256 with PBKDF2-HMAC-SHA256 (600k iters)
+#                  passphrase-based fallback for hosts without age; the alias
+#                  `aesgcm-pbkdf2` selects the same container.
+#   none           no encryption - only for labs. Recorded in the manifest.
+encryption         = age
+# age recipients file (public keys). Private identity lives separately.
+age_recipients_file = /etc/librenms-backup/keys/recipients.txt
+age_identity_file   = /etc/librenms-backup/keys/identity.txt
+# openssl fallback: passphrase file, root:librenms 0640, one line
+openssl_passphrase_file = /etc/librenms-backup/keys/passphrase
+
+# Verification policy: always | scheduled-only | never
+verify_after_backup = always
+# Full re-read + checksum verify of every archived member (slow, thorough)
+verify_deep         = false
+
+[database]
+# mariadb-dump is auto-detected (falls back to mysqldump on older releases).
+dump_tool          = auto
+# Single transaction gives a consistent InnoDB snapshot without locking.
+single_transaction = true
+# Include triggers, routines, events
+routines           = true
+# Exclude these tables from the dump (pipe separated). Empty = all tables.
+exclude_tables     =
+# Extra args appended verbatim to mariadb-dump (validated against an allowlist)
+extra_args         =
+# Connection details: leave blank to read from LibreNMS .env / config.php
+db_host            =
+db_port            = 3306
+db_name            =
+db_user            =
+db_password        =
+
+[components]
+# Toggle individual backup components. Full backup = all true.
+database           = true
+rrd                = true
+application        = true
+system             = true
+integrations       = true
+
+# Files/dirs under librenms_root copied into application/
+application_paths  = config.php
+                     .env
+                     bootstrap/cache/config.php
+                     includes/definitions/custom
+                     html/includes/custom
+                     resources/views/overrides
+
+# Whole directory trees copied into rrd/
+rrd_paths          = rrd
+
+# Read-only paths collected into system/ (relative layout preserved).
+# Machine-specific network settings are collected for reference only and are
+# NOT restored automatically (see docs/RESTORE.md section "Portability").
+system_paths       = /etc/apache2/sites-available
+                     /etc/apache2/conf-available
+                     /etc/apache2/mods-available
+                     /etc/php
+                     /etc/mysql
+                     /etc/snmp
+                     /etc/cron.d
+                     /etc/crontab
+                     /etc/systemd/system
+                     /etc/smokeping
+                     /etc/ssl/certs
+                     /etc/ssl/private
+                     /etc/letsencrypt
+
+# Never-baked paths (safety net, applied on top of system_paths)
+system_excludes    = /etc/php/*/fpm/pool.d/*.sock
+                     **/*.pid
+                     **/*.sock
+
+# Custom integrations/nagios plugin dirs copied into integrations/
+integration_paths  = /usr/lib/nagios/plugins
+                     /opt/librenms/includes/services
+
+[restore]
+# Require this literal confirmation string from the GUI for a full restore.
+confirm_phrase     = RESTORE
+# Abort restore if free space is less than archive_uncompressed * this factor.
+space_factor       = 1.25
+# Keep a recovery checkpoint of the CURRENT state before restoring.
+checkpoint_before_restore = true
+# Run `lnms config:clear`-equivalent after configuration restore
+clear_caches       = true
+# Service validation commands (read-only checks, run through the helper)
+validate_services  = mariadb apache2 php8.4-fpm
+
+[retention]
+# Applied after every successful backup. 0 = unlimited of that kind.
+keep_daily         = 7
+keep_weekly        = 4
+keep_monthly       = 6
+keep_total         = 0
+# Never delete an archive referenced by the newest N checkpoints
+protect_checkpoints = 2
+
+[notifications]
+# LibreNMS native notifications are used by default (no SMTP config needed).
+librenms_transport = true
+# Optional mail fallback
+smtp_enabled       = false
+smtp_host          = localhost
+smtp_port          = 25
+smtp_from          = librenms@example.com
+smtp_to            =

@@ -1,0 +1,18 @@
+[Unit]
+Description=LibreNMS Backup & Restore schedule evaluator
+After=mariadb.service librenms-backup-dispatch.service
+
+[Service]
+Type=oneshot
+User=librenms
+Group=librenms
+Environment=BR_CONF=/etc/librenms-backup/br.conf
+Environment=PYTHONPATH=/opt/librenms-backup-restore/worker
+WorkingDirectory=/opt/librenms-backup-restore/worker
+ExecStart=/usr/bin/python3 -m br.worker scheduler-tick
+TimeoutStartSec=120
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/var/backups/librenms /var/log/librenms-backup /var/lib/librenms-backup /run/librenms-backup
+UMask=0027

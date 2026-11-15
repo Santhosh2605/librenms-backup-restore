@@ -1,0 +1,48 @@
+[Unit]
+Description=LibreNMS Backup & Restore privileged helper
+Documentation=file:/opt/librenms-backup-restore/docs/SECURITY.md
+After=network.target mariadb.service
+Wants=mariadb.service
+# The helper must never be restarted automatically while a restore runs.
+RefuseManualStop=no
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=BR_CONF=/etc/librenms-backup/br.conf
+Environment=PYTHONPATH=/opt/librenms-backup-restore/worker
+ExecStart=/usr/bin/python3 -m br.helper
+Restart=on-failure
+RestartSec=3
+# --- hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=no
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# A restore legitimately writes /etc, /opt/librenms, /var/lib and our own
+# state/log/backup trees. ProtectSystem=full would mount /etc and /usr
+# read-only and make every restore fail at RESTORING_CONFIGURATION, so the
+# filesystem must stay writable; the constraint is the helper's path allowlist
+# (see PathPolicy in worker/br/helper.py), which is enforced on every call.
+ProtectSystem=no
+# /run/librenms-backup  socket + HMAC secret
+# /var/lib/librenms-backup  worker health + restore lock
+# /var/backups/librenms     archives, checkpoints, staging
+# /var/log/librenms-backup  helper and worker logs
+# /etc                      restored system configuration
+# /opt/librenms             restored application tree and RRD data
+ReadWritePaths=/run/librenms-backup /var/lib/librenms-backup /var/backups/librenms \
+               /var/log/librenms-backup /etc /opt/librenms
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

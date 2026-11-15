@@ -1,0 +1,10 @@
+/var/log/librenms-backup/*.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 librenms librenms
+    su librenms librenms
+}
