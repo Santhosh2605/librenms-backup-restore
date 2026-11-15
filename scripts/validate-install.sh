@@ -11,6 +11,7 @@ set -uo pipefail
 PREFIX="${PREFIX:-/opt/librenms-backup-restore}"
 LIBRENMS_ROOT="${LIBRENMS_ROOT:-/opt/librenms}"
 APP_USER="${APP_USER:-librenms}"
+APP_GROUP="${APP_GROUP:-librenms}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/librenms}"
 CONF_DIR="/etc/librenms-backup"
 FAILED=0
@@ -220,6 +221,27 @@ if command -v curl >/dev/null 2>&1; then
         404) bad "entrypoint returns 404 - check Apache config / RewriteRule" ;;
         *)   warn "unexpected HTTP status: $probe" ;;
     esac
+fi
+
+hdr "13. Test suite runnable"
+# "Run the tests to verify" is only useful advice if pytest is actually there.
+if python3 -c 'import pytest' 2>/dev/null; then
+    ver="$(python3 -m pytest --version 2>/dev/null | head -1)"
+    ok "pytest available ($ver)"
+    if [[ -d "$PREFIX/tests" ]]; then
+        ok "test suite present at $PREFIX/tests"
+        if ( cd "$PREFIX" && python3 -m pytest -q --tb=no >/tmp/br-selftest.log 2>&1 ); then
+            tail -1 /tmp/br-selftest.log | sed 's/^/        /'
+            ok "self-test passed"
+        else
+            bad "self-test FAILED - see /tmp/br-selftest.log"
+        fi
+    else
+        warn "tests/ not installed under $PREFIX (older release?) - run them from the download"
+    fi
+else
+    warn "pytest not installed - 'python3 -m pytest' will fail"
+    warn "  install with: sudo apt-get install -y python3-pytest"
 fi
 
 hdr "Summary"

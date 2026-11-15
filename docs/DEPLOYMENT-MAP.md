@@ -286,7 +286,7 @@ a read-only filesystem error.
 ## 5. Verifying a deployment
 
 ```bash
-# 12 sections: code, helper, sudoers, config+keys, storage, web exposure,
+# 13 sections: code, helper, sudoers, config+keys, storage, web exposure,
 # plugin registration, DB schema, systemd units, worker health, core integrity,
 # HTTP surface
 sudo /opt/librenms-backup-restore/scripts/validate-install.sh

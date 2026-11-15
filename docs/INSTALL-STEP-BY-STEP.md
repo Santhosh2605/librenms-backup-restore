@@ -357,10 +357,72 @@ cd /opt/librenms-backup-restore
 sudo bash scripts/validate-install.sh
 ```
 
-It checks twelve things and prints `PASS` / `WARN` / `FAIL` for each. You want
+It checks thirteen things and prints `PASS` / `WARN` / `FAIL` for each. You want
 zero `FAIL`s.
 
 ---
+
+## Running the test suite (optional)
+
+The plugin ships its own tests. They are the fastest way to confirm the code
+behaves correctly **on your Python version**, without touching your LibreNMS
+data. Running them is safe: they use temporary directories and never write to
+`/etc`, `/var/backups` or your database.
+
+Install the test runner once:
+
+```bash
+sudo apt-get install -y python3-pytest
+```
+
+That package is in Ubuntu's main archive. If your host has no `apt` access to
+it, the pip form works too:
+
+```bash
+sudo python3 -m pip install --break-system-packages pytest
+```
+
+(On Ubuntu 24.04+ `pip` refuses to install into the system Python without
+`--break-system-packages`. That flag is what makes it work; the tests are a
+diagnostic tool, so a system-wide install is fine.)
+
+**You only need `pytest` itself.** With nothing else installed the suite reports
+`130 passed, 24 skipped` — the extra skips are the `cryptography`-dependent
+crypto tests, which you already satisfy on a real install.
+
+Then run them from **either** location — whichever contains the code:
+
+```bash
+# a) from the extracted download (before or without installing)
+cd /tmp/librenms-backup-restore-main
+python3 -m pytest
+
+# b) from the installed tree
+cd /opt/librenms-backup-restore
+python3 -m pytest
+```
+
+You do **not** need `sudo` to run the tests. Expected result:
+
+```
+133 passed, 21 skipped
+```
+
+The 21 skips are integration tests that need a live LibreNMS at a URL you
+supply. They are skipped on purpose — it is not a failure.
+
+To include them, point them at your install:
+
+```bash
+BR_TEST_BASE_URL=http://127.0.0.1 BR_TEST_USER=youruser BR_TEST_PASS='yourpass' python3 -m pytest tests/integration
+```
+
+> If you see `command not found` or `No module named pytest`, run
+> `sudo apt-get install -y python3-pytest` and try again.
+>
+> If `install.sh` was run from an older release, the `tests/` folder may not be
+> in `/opt/librenms-backup-restore`. Run them from the extracted download
+> instead — the code is identical.
 
 ## Upgrading later
 
@@ -388,6 +450,28 @@ those too, read `scripts/uninstall.sh --help` first — they are deleted
 permanently.
 
 ---
+
+## After an upgrade: "did the new code actually take effect?"
+
+PHP-FPM compiles your PHP files and keeps the result in **opcache**. On a host
+with `opcache.validate_timestamps = 0` it never re-reads them, so the web tier
+can keep running the *previous* release while every file on disk is correct. The
+classic symptom is an error message that belongs to the version you just
+replaced.
+
+`install.sh` reloads `php*-fpm` automatically. To check by hand:
+
+```bash
+# what the API says it is running (needs a logged-in session cookie)
+curl -s -b /tmp/ck.txt "http://127.0.0.1/plugin-backuprestore.php?r=status" | grep -o '"build":"[^"]*"'
+# -> "build":"1.0.2"     correct
+# -> "build":"1.0.1"     opcache still serving the old code
+
+sudo systemctl reload php*-fpm
+```
+
+Every API error also carries `"build"`, so the version that failed is always
+visible.
 
 ## Where the logs are (there are two)
 

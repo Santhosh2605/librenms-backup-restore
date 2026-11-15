@@ -30,6 +30,16 @@ require $librenmsRoot . '/vendor/autoload.php';
 $app = require $librenmsRoot . '/bootstrap/app.php';
 $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 
+// Laravel's console exception handler renders a nice error block and then
+// exits 0. Every caller here is a shell script that tests the exit status, so
+// a fatal error used to look like success ("ok schema applied" printed over a
+// broken migration). Force a non-zero status for anything uncaught.
+set_exception_handler(function (Throwable $e): void {
+    fwrite(STDERR, 'br-schema failed: ' . $e->getMessage() . "\n");
+    fwrite(STDERR, '  at ' . basename($e->getFile()) . ':' . $e->getLine() . "\n");
+    exit(1);
+});
+
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -48,8 +58,44 @@ function br_get_version(): ?string
         return null;
     }
     $row = DB::table('br_settings')->where('key', 'schema_version')->first();
+    $raw = $row->value ?? null;
+    if (! is_string($raw)) {
+        return null;
+    }
+    // Unwrap a double-encoded value written by releases before 1.0.2: the
+    // column held a JSON string whose contents were themselves JSON.
+    $once = json_decode($raw, true);
+    if (is_string($once)) {
+        $twice = json_decode($once, true);
+        if ($twice !== null) {
+            return $once;
+        }
+    }
 
-    return $row->value ?? null;
+    return $raw;
+}
+
+/**
+ * The applied-migration list, tolerant of every shape this key has held:
+ * array, double-encoded JSON string, single name, or absent.
+ */
+function br_applied_migrations(): array
+{
+    $raw = br_get_version();
+    if ($raw === null || $raw === '') {
+        return [];
+    }
+    $decoded = json_decode($raw, true);
+    if (is_array($decoded)) {
+        return array_values(array_filter($decoded, 'is_string'));
+    }
+    if (is_string($decoded) && $decoded !== '') {
+        // Still a string after two decodes: treat as a single migration name.
+        return [$decoded];
+    }
+
+    // Not JSON at all: a bare version string from an early release.
+    return [$raw];
 }
 
 function br_set_version(string $value): void
@@ -57,6 +103,21 @@ function br_set_version(string $value): void
     DB::table('br_settings')->updateOrInsert(
         ['key' => 'schema_version'],
         ['value' => json_encode($value), 'updated_at' => now()]
+    );
+}
+
+/**
+ * Store the applied-migration list.
+ *
+ * The list is stored as a JSON array. Older releases accidentally stored it
+ * double-encoded (a JSON string containing JSON), which made every second
+ * run fatal. Readers therefore accept both shapes.
+ */
+function br_set_version_list(array $applied): void
+{
+    DB::table('br_settings')->updateOrInsert(
+        ['key' => 'schema_version'],
+        ['value' => json_encode(array_values($applied)), 'updated_at' => now()]
     );
 }
 
@@ -83,7 +144,7 @@ switch ($command) {
 
         $files = glob($migrationDir . '/*.php');
         sort($files);
-        $applied = json_decode((string) br_get_version(), true) ?: [];
+        $applied = br_applied_migrations();
         $didWork = false;
 
         foreach ($files as $file) {
@@ -104,7 +165,11 @@ switch ($command) {
             // after they succeed, which gives us the same safety property.
             $migration->up();
             $applied[] = $name;
-            br_set_version(json_encode($applied));
+            // br_set_version() json_encodes its argument, so pass the array.
+            // Passing json_encode($applied) stored a JSON *string*, and the next
+            // run's json_decode() returned a string, making in_array() fatal:
+            //   in_array(): Argument #2 ($haystack) must be of type array
+            br_set_version_list($applied);
             $didWork = true;
         }
 
@@ -136,7 +201,7 @@ switch ($command) {
             ['plugin_active' => 1]
         );
 
-        echo "Schema version: " . implode(', ', $applied) . "\n";
+        echo "Schema version: " . ($applied ? implode(', ', $applied) : 'none') . "\n";
         foreach (br_tables() as $table => $exists) {
             printf("  %-16s %s\n", $table, $exists ? 'OK' : 'MISSING');
         }
@@ -151,7 +216,8 @@ switch ($command) {
 
     case 'status':
         echo "Database: " . DB::connection()->getDatabaseName() . "\n";
-        echo "Schema version: " . (br_get_version() ?? 'not installed') . "\n";
+        $appliedNames = br_applied_migrations();
+        echo "Schema version: " . ($appliedNames ? implode(', ', $appliedNames) : 'not installed') . "\n";
         $ok = true;
         foreach (br_tables() as $table => $exists) {
             printf("  %-16s %s\n", $table, $exists ? 'OK' : 'MISSING');

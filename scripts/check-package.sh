@@ -316,6 +316,46 @@ else
     warn "CHANGELOG has no top [$PY_VER] section"
 fi
 
+hdr "PHP scripts report failure honestly"
+# Laravel's console handler renders an error block and then exits 0. Every
+# caller of br-schema.php is a shell script testing $?, so without an explicit
+# handler a fatal migration prints "ok schema applied" over a broken install.
+if grep -q 'set_exception_handler' "$HERE/scripts/br-schema.php"; then
+    ok "br-schema.php forces a non-zero exit on uncaught errors"
+else
+    bad "br-schema.php lets Laravel exit 0 after a fatal - failures look like success"
+fi
+# The stored migration list must never be double-encoded again.
+if grep -q 'br_set_version(json_encode' "$HERE/scripts/br-schema.php"; then
+    bad "br-schema.php double-encodes schema_version (in_array() fatal on 2nd run)"
+else
+    ok "schema_version is stored once-encoded"
+fi
+if grep -q 'function br_applied_migrations' "$HERE/scripts/br-schema.php"; then
+    ok "schema_version reader tolerates legacy shapes"
+else
+    bad "no tolerant reader for schema_version"
+fi
+
+hdr "Test suite is shippable"
+# The suite is only useful on a target host if install.sh copies it and pytest
+# can find it without being told where to look.
+if grep -q 'SRC_DIR/tests/' "$HERE/scripts/install.sh"; then
+    ok "install.sh ships the test suite to \$PREFIX/tests"
+else
+    bad "install.sh does not copy tests/ - 'python3 -m pytest' fails on the host"
+fi
+if grep -q '^pythonpath = worker' "$HERE/pytest.ini"; then
+    ok "pytest.ini sets pythonpath so tests run without install"
+else
+    bad "pytest.ini missing pythonpath=worker"
+fi
+if [[ -d "$HERE/tests/unit" ]] && ls "$HERE"/tests/unit/test_*.py >/dev/null 2>&1; then
+    ok "unit tests present"
+else
+    bad "tests/unit is empty or missing"
+fi
+
 hdr "Documentation"
 for doc in docs/INSTALL.md docs/RESTORE.md docs/SECURITY.md \
            docs/ARCHITECTURE.md docs/SCHEDULER.md docs/CHANGELOG.md

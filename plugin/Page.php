@@ -44,8 +44,13 @@ class Page extends PageHook
             'brBootstrap' => \App\Plugins\BackupRestore\Services\ApiKernel::bootstrapPayload($userId),
             'brUser' => auth()->user()->username,
             'brAssets' => [
-                'css' => url('plugin-backuprestore.php') . '?r=assets/backup-restore.css',
-                'js' => url('plugin-backuprestore.php') . '?r=assets/backup-restore.js',
+                // ?v=<version> is a cache-buster. Without it a browser can keep
+                // serving the previous bundle for minutes after an upgrade, so a
+                // deployed fix looks like it did not work.
+                'css' => url('plugin-backuprestore.php')
+                    . '?r=assets/backup-restore.css&v=' . rawurlencode(\App\Plugins\BackupRestore\Services\Version::VERSION),
+                'js' => url('plugin-backuprestore.php')
+                    . '?r=assets/backup-restore.js&v=' . rawurlencode(\App\Plugins\BackupRestore\Services\Version::VERSION),
             ],
         ];
     }

@@ -53,6 +53,27 @@ fi
 # ---------------------------------------------------------------------------
 step "0. Pre-flight checks"
 # ---------------------------------------------------------------------------
+# The installer copies plugin/ and front-controller/ into LibreNMS, but does NOT
+# install them under $PREFIX. Running it from $PREFIX (or from any tree that
+# lacks those directories) used to fail deep in step 9 with a bare rsync error,
+# long after "code installed" had been printed - which made a stale tree look
+# like a successful install. Refuse early and say what to do instead.
+if [[ ! -d "$SRC_DIR/plugin/Controllers" \
+   || ! -f "$SRC_DIR/front-controller/plugin-backuprestore.php" ]]; then
+    die "this is not a complete source tree: $SRC_DIR has no plugin/ or front-controller/.
+       install.sh must be run from the EXTRACTED DOWNLOAD, not from $PREFIX.
+       Installer:  $0
+       Source dir: $SRC_DIR
+
+       cd /tmp/librenms-backup-restore-main   # or wherever you unpacked it
+       sudo ./scripts/install.sh"
+fi
+
+# Say which version is being installed - "did the update actually land?" is the
+# first question whenever a fix appears not to work.
+BR_VERSION="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$SRC_DIR/worker/br/common.py" 2>/dev/null | head -1)"
+[[ -n "$BR_VERSION" ]] && c_info "LibreNMS Backup & Restore v$BR_VERSION from $SRC_DIR"
+
 [[ -d "$LIBRENMS_ROOT" ]] || die "LibreNMS root not found: $LIBRENMS_ROOT"
 [[ -f "$LIBRENMS_ROOT/artisan" ]] || die "$LIBRENMS_ROOT does not look like a LibreNMS install"
 id "$APP_USER" >/dev/null 2>&1 || die "system user '$APP_USER' does not exist"
@@ -118,6 +139,13 @@ rsync -a --delete \
     "$SRC_DIR/worker/" "$PREFIX/worker/"
 rsync -a --delete "$SRC_DIR/scripts/" "$PREFIX/scripts/"
 rsync -a --delete "$SRC_DIR/docs/" "$PREFIX/docs/" 2>/dev/null || true
+# The test suite is installed too, so an operator can prove the worker behaves
+# on THIS host's Python rather than taking the release notes on trust. It is
+# root-owned like the rest of the tree and nothing loads it at runtime.
+if [[ -d "$SRC_DIR/tests" ]]; then
+    rsync -a --delete --exclude '__pycache__' "$SRC_DIR/tests/" "$PREFIX/tests/" 2>/dev/null || true
+    [[ -f "$SRC_DIR/pytest.ini" ]] && install -m 0644 "$SRC_DIR/pytest.ini" "$PREFIX/pytest.ini"
+fi
 chown -R root:root "$PREFIX"
 find "$PREFIX" -type d -exec chmod 0755 {} +
 find "$PREFIX" -type f -exec chmod 0644 {} +
@@ -367,12 +395,42 @@ install -o "$APP_USER" -g "$APP_GROUP" -m 0644 \
     "$LIBRENMS_ROOT/html/plugin-backuprestore.php"
 c_ok "front controller installed: $LIBRENMS_ROOT/html/plugin-backuprestore.php"
 
+# PHP keeps compiled bytecode in opcache. With opcache.validate_timestamps on it
+# re-reads within `revalidate_freq` seconds, but a hardened host may set
+# validate_timestamps=0, in which case the OLD front controller keeps running
+# until PHP restarts - an upgrade then looks like it did nothing at all, and the
+# first symptom is a stale error message from the previous release.
+# Note: OPcache is per-SAPI. The CLI will happily report the new file while the
+# web tier still serves the old one, so checking `php -l` proves nothing here.
+reload_php() {
+    local unit
+    for unit in $(systemctl list-units --type=service --plain --no-legend \
+            'php*-fpm.service' 'php-fpm.service' 2>/dev/null | awk '{print $1}'); do
+        if systemctl reload "$unit" >/dev/null 2>&1; then
+            c_ok "reloaded $unit (flushes the web tier's opcache)"
+        elif systemctl restart "$unit" >/dev/null 2>&1; then
+            c_ok "restarted $unit (flushes the web tier's opcache)"
+        else
+            c_warn "could not reload $unit - reload it yourself: systemctl reload $unit"
+        fi
+    done
+    if command -v apache2ctl >/dev/null 2>&1 || systemctl is-active --quiet apache2 2>/dev/null; then
+        systemctl reload apache2 >/dev/null 2>&1 && c_ok "reloaded apache2"
+    fi
+}
+reload_php
+
 # ---------------------------------------------------------------------------
 step "10. Database schema"
 # ---------------------------------------------------------------------------
 c_info "applying plugin schema (own br_* tables only)"
-sudo -u "$APP_USER" -H env LIBRENMS_ROOT="$LIBRENMS_ROOT" PHP_USER="$APP_USER" \
-    "$PHP_BIN" "$PREFIX/scripts/br-schema.php" install || die "schema install failed"
+# Capture the status explicitly. br-schema.php runs inside Laravel, whose console
+# exception handler renders a tidy error block and exits 0 - so a fatal used to
+# print "ok schema applied" over a broken migration.
+if ! sudo -u "$APP_USER" -H env LIBRENMS_ROOT="$LIBRENMS_ROOT" PHP_USER="$APP_USER" \
+        "$PHP_BIN" "$PREFIX/scripts/br-schema.php" install; then
+    die "schema install failed - see the error above"
+fi
 c_ok "schema applied"
 
 # Prove the schema is complete rather than trusting the install exit code.

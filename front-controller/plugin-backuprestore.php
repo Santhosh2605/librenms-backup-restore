@@ -225,11 +225,29 @@ $logPath = (function () use ($app): string {
 $wantsJson = ($resource !== '')
     || str_contains($request->getRequestUri(), '/br/');
 
+// The version of THIS file's code, read from the installed plugin package.
+// PHP-FPM keeps compiled bytecode in opcache, so after an upgrade the web tier
+// can still be running the previous release while `php -l` on disk looks
+// perfect. Reporting the version in every API response makes "is the new code
+// actually running?" a fact instead of an inference.
+$brBuild = (function (): string {
+    try {
+        $ver = @file_get_contents(__DIR__ . '/../app/Plugins/BackupRestore/Services/Version.php');
+        if (is_string($ver) && preg_match("/const VERSION = '([^']+)'/", $ver, $m)) {
+            return $m[1];
+        }
+    } catch (\Throwable) {
+        // ignore
+    }
+
+    return 'unknown';
+})();
+
 if ($wantsJson) {
     try {
         $handler = $app->make(\Illuminate\Contracts\Debug\ExceptionHandler::class);
         if (method_exists($handler, 'renderable')) {
-            $handler->renderable(function (\Throwable $e, $req) use ($logPath) {
+            $handler->renderable(function (\Throwable $e, $req) use ($logPath, $brBuild) {
                 // Only JSON for our own namespace; core LibreNMS errors keep
                 // their normal rendering.
                 $uri = $req->getRequestUri();
@@ -258,6 +276,7 @@ if ($wantsJson) {
                     'at' => $ours ? basename($file) . ':' . $e->getLine() : null,
                     'hint' => $notFound ? null : 'full trace in ' . ($logPath ?? 'the LibreNMS log'),
                     'log' => $notFound ? null : ($logPath ?? null),
+                    'build' => $brBuild ?? null,
                 ], $status, [], JSON_UNESCAPED_SLASHES);
             });
         }

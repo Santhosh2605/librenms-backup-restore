@@ -31,6 +31,94 @@ treated as restorable when this host's `visudo` accepts it; otherwise it is kept
 aside as `.br-broken` and the install removes the file entirely on failure,
 which is the only genuinely safe state.
 
+### Fixed — the installer never reloaded PHP, so upgrades ran stale code
+
+PHP-FPM holds compiled bytecode in opcache. `install.sh` replaced files but never
+reloaded the web tier, so on a host with `opcache.validate_timestamps = 0` the
+previous release kept running indefinitely — including its old error messages,
+which made a deployed fix look inert. The installer now reloads every
+`php*-fpm` unit (and `apache2` if present) after installing the front controller,
+warning explicitly if it cannot.
+
+Because opcache is per-SAPI, `php -l` on the CLI proves nothing about the web
+tier. The front controller and `GET ?r=status` now report the running `build`,
+and every API error payload carries it, so the version that failed is a fact
+rather than an inference.
+
+### Fixed — the schema installer fataled on every second run
+
+`br_set_version()` already JSON-encodes its argument, and the caller wrapped the
+value in `json_encode()` first. The stored `schema_version` was therefore a JSON
+*string* containing JSON, so the next run's `json_decode()` returned a string and
+`in_array()` fataled:
+
+```
+in_array(): Argument #2 ($haystack) must be of type array, string given
+```
+
+A new `br_set_version_list()` stores the array once, and `br_applied_migrations()`
+reads every historical shape (array, double-encoded, bare name, absent). Verified
+against a database holding the corrupted value: the migration is now correctly
+skipped and the schema reported complete. The `status` output also prints the
+decoded list instead of the raw JSON blob.
+
+### Fixed — a failed schema step reported success
+
+Laravel's console exception handler renders a formatted error block and then
+**exits 0**. `install.sh` tested `$?`, so a fatal migration printed
+`ok schema applied` over a broken install. `br-schema.php` now installs its own
+`set_exception_handler` that writes to stderr and exits 1; `install.sh` tests the
+status explicitly.
+
+### Fixed — `APP_GROUP: unbound variable` aborted validation
+
+The storage-ownership check added in the previous release referenced
+`$APP_GROUP`, which `validate-install.sh` never defined. Under `set -u` that
+killed the script mid-run at section 5, so sections 6–13 never executed and the
+install ended with "validation reported problems". The variable is now declared,
+and the whole script was re-scanned for other undeclared expansions.
+
+### Fixed — an upgrade could silently leave the old plugin files in place
+
+`install.sh` copies `plugin/` and `front-controller/` into LibreNMS from
+`$SRC_DIR`, but does **not** install them under `$PREFIX`. So running
+`/opt/librenms-backup-restore/scripts/install.sh` (the obvious thing to do after
+extracting an update there) failed in step 9 with a bare rsync error — long
+after "code installed" had been printed — and the tree kept serving the previous
+release. A fix could therefore appear to have been deployed when nothing had
+changed. The installer now checks for `plugin/Controllers` and
+`front-controller/plugin-backuprestore.php` before doing anything, and refuses
+with instructions if they are missing. It also prints the version and source
+directory as the first line, so "did the update land?" is answerable at a glance.
+
+### Fixed — a cached JS bundle hid deployed fixes
+
+Assets were served as fixed URLs with `Cache-Control: max-age=300`, so a browser
+could run the previous bundle for minutes after an upgrade and a deployed fix
+looked inert. Asset URLs now carry `?v=<version>` from `Page::data()`, the cache
+lifetime is extended to a day **only** for versioned URLs, and the unversioned
+form keeps the old short TTL.
+
+### Fixed — "install pytest" was the only missing step, and it was undocumented
+
+`python3 -m pytest` on a stock Ubuntu host fails with `No module named pytest`;
+`pytest` is not part of a default install. The guide now gives the apt package
+(`python3-pytest`) and the pip form with `--break-system-packages` for hosts
+where pip refuses to touch the system Python, and states the expected counts for
+both a bare host (130 passed, 24 skipped) and a provisioned one (133 passed, 21
+skipped). `validate-install.sh` gained section 13, which says plainly whether
+pytest is available and runs the suite if it is.
+
+### Fixed — the test suite was not installed, so `pytest` failed on the host
+
+`install.sh` copied `worker/`, `scripts/` and `docs/` only, so the release notes
+told operators to run `python3 -m pytest` against a `tests/` directory that did
+not exist on their server. The suite (and `pytest.ini`) is now installed to
+`$PREFIX/tests`, and it runs equally from the extracted download because
+`pytest.ini` sets `pythonpath = worker`. Documented in the step-by-step guide
+and in a README "Verify" section; `check-package.sh` fails if the copy step or
+the `pythonpath` setting disappears.
+
 ### Fixed — the error hint named a log file that does not exist
 
 The new 500 handler told operators to check `storage/logs/librenms.log`, and

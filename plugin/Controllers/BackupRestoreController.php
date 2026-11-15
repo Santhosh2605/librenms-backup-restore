@@ -58,7 +58,12 @@ class BackupRestoreController
 
         return response()->file($path, [
             'Content-Type' => $allowed[$asset] . '; charset=utf-8',
-            'Cache-Control' => 'private, max-age=300',
+            // Versioned URLs (?v=) make a long cache safe: a new release changes
+            // the URL, so stale bundles cannot outlive the deploy. Without the
+            // explicit ?v= (e.g. a hand-typed URL) keep the short cache.
+            'Cache-Control' => isset($_GET['v'])
+                ? 'private, max-age=86400'
+                : 'private, max-age=300',
             'X-Content-Type-Options' => 'nosniff',
         ]);
     }
@@ -104,6 +109,10 @@ class BackupRestoreController
         $next = $this->nextScheduled();
 
         return ApiKernel::ok([
+            // Which build is answering. Lets an operator confirm that a deployed
+            // update is really running, rather than inferring it from a file on
+            // disk that opcache may not have picked up yet.
+            'build' => \App\Plugins\BackupRestore\Services\Version::VERSION,
             'totals' => [
                 'backups' => $total,
                 'verified' => Backup::where('verified_status', 'verified')->count(),
