@@ -1,6 +1,6 @@
 [Unit]
 Description=LibreNMS Backup & Restore scheduler (daily/weekly/monthly)
-Documentation=file:/opt/librenms-backup-restore/docs/SCHEDULER.md
+Documentation=file:@BR_PREFIX@/docs/SCHEDULER.md
 
 [Timer]
 # Runs every minute and lets br.worker decide whether a schedule is due.

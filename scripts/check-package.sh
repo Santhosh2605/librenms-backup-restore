@@ -35,6 +35,7 @@ hdr "Installer payload (files the installer copies must exist)"
 for path in \
     config/br.conf.example config/br-sudoers config/logrotate/librenms-backup \
     docs/DEPLOYMENT-MAP.md \
+    docs/INSTALL-STEP-BY-STEP.md \
     docs/GITHUB-DESCRIPTION.md \
     config/systemd/br-helper.service \
     config/systemd/librenms-backup-dispatch.service \
@@ -179,15 +180,107 @@ else
     ok "helper unit leaves /etc writable (restore target)"
 fi
 
-# Every path a restore writes must appear in ReadWritePaths.
+# Every path a restore writes must appear in ReadWritePaths. The unit is a
+# template now, so compare against the RENDERED default form rather than the
+# raw file, and check the placeholder it should use.
+rendered_helper="$(sed -e 's#@BR_PREFIX@#/opt/librenms-backup-restore#g' \
+    -e 's#@BR_LIBRENMS_ROOT@#/opt/librenms#g' -e 's#@BR_APP_USER@#librenms#g' \
+    -e 's#@BR_APP_GROUP@#librenms#g' -e 's#@BR_BACKUP_ROOT@#/var/backups/librenms#g' \
+    -e 's#@BR_STATE_DIR@#/var/lib/librenms-backup#g' -e 's#@BR_LOG_DIR@#/var/log/librenms-backup#g' \
+    -e 's#@BR_RUN_DIR@#/run/librenms-backup#g' "$helper_unit")"
 for need in /etc /var/backups/librenms /var/lib/librenms-backup /var/log/librenms-backup; do
-    if awk '/^ReadWritePaths=/{f=1} f{printf "%s", $0} f&&!/\\$/{exit}' "$helper_unit" \
+    if printf '%s\n' "$rendered_helper" \
+        | awk '/^ReadWritePaths=/{f=1} f{printf "%s", $0} f&&!/\\$/{exit}' \
         | grep -q -- "$need"; then
         ok "ReadWritePaths covers $need"
     else
         bad "ReadWritePaths missing $need"
     fi
 done
+
+# Templating must cover the user, so an APP_USER override is honoured.
+hdr "systemd unit templating"
+for tpl in @BR_APP_USER@ @BR_APP_GROUP@ @BR_PREFIX@ @BR_LIBRENMS_ROOT@; do
+    if grep -q -- "$tpl" "$HERE"/config/systemd/librenms-backup-worker@.service \
+       || grep -q -- "$tpl" "$HERE"/config/systemd/br-helper.service; then
+        ok "units use $tpl"
+    else
+        bad "units hardcode the value for $tpl (overrides would be ignored)"
+    fi
+done
+if grep -qE '^User=librenms$' "$HERE"/config/systemd/*.service; then
+    bad "a unit still hardcodes User=librenms"
+else
+    ok "no unit hardcodes User=librenms"
+fi
+if grep -q 'render_unit' "$HERE/scripts/install.sh"; then
+    ok "install.sh renders the unit templates"
+else
+    bad "install.sh does not render unit templates"
+fi
+
+hdr "Sudo policy portability"
+# sudo-rs (Ubuntu 26.04 default) rejects the whole file if any Defaults option
+# is unknown to it. !requiretty and !logfile are both unsupported there, and a
+# rejected file in /etc/sudoers.d can lock the administrator out of sudo.
+for opt in requiretty logfile; do
+    if grep -qE "^Defaults:[^ ]+ !?${opt}\b" "$HERE/config/br-sudoers"; then
+        bad "br-sudoers uses '$opt' - rejected by sudo-rs on Ubuntu 26.04"
+    else
+        ok "br-sudoers avoids '$opt' (sudo-rs compatible)"
+    fi
+done
+
+# Docs are copied by hand, so a bad snippet in a doc recreates the outage just
+# as effectively as a bad config file. Flag any doc that still PRINTS the line.
+doc_hits="$(grep -rnE "^Defaults:[^ ]+ !?(requiretty|logfile)\b" \
+    "$HERE"/docs "$HERE"/README.md 2>/dev/null || true)"
+if [[ -n "$doc_hits" ]]; then
+    bad "documentation still shows a sudo-rs-incompatible Defaults line"
+    printf '        %s\n' "$doc_hits"
+else
+    ok "no documentation prints requiretty/logfile as a snippet"
+fi
+# The install must validate before writing, never after.
+if grep -q 'visudo -c -f "$TMP_SUDOERS"' "$HERE/scripts/install.sh"; then
+    ok "install.sh validates sudoers in a scratch file first"
+else
+    bad "install.sh does not pre-validate sudoers (a bad file can break sudo)"
+fi
+
+hdr "README architecture diagram"
+if grep -q '^```mermaid$' "$HERE/README.md"; then
+    ok "README has a mermaid diagram"
+
+    # The diagram states counts. If the wording changes so the count can no
+    # longer be found, that is drift too - so "missing" is a failure, not a skip.
+    check_count() {
+        local label="$1" expect="$2" real="$3"
+        if ! grep -q -- "$label" "$HERE/README.md"; then
+            bad "README no longer states '$label' (diagram drift)"
+        elif [[ "$real" == "$expect" ]]; then
+            ok "README '$label' matches code ($real)"
+        else
+            bad "README claims '$label' but code has $real"
+        fi
+    }
+    check_count "22 routes" "22" \
+        "$(grep -c 'Route::get\|Route::post' "$HERE/front-controller/plugin-backuprestore.php")"
+    check_count "20 operations" "20" \
+        "$(sed -n '/^OPERATIONS = {/,/^}/p' "$HERE/worker/br/helper_client.py" \
+           | grep -oE '"[a-z_.]+"' | wc -l)"
+
+    # Every code path named in the component table must exist.
+    missing=0
+    while read -r path; do
+        [[ -z "$path" ]] && continue
+        [[ -e "$HERE/$path" ]] || { bad "diagram references missing path: $path"; missing=1; }
+    done < <(sed -n '/^### Component reference/,/^###/p' "$HERE/README.md" \
+             | grep -oE '`(worker|plugin|front-controller)/[A-Za-z0-9_./-]+`' | tr -d '`' | sort -u)
+    [[ $missing -eq 0 ]] && ok "diagram component paths all exist"
+else
+    bad "README has no mermaid architecture diagram"
+fi
 
 hdr "Version consistency"
 PY_VER="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' "$HERE/worker/br/common.py" | head -1)"
@@ -199,10 +292,23 @@ elif [[ "$PY_VER" == "$PHP_VER" ]]; then
 else
     bad "version drift: worker=$PY_VER plugin=$PHP_VER"
 fi
-if grep -q "librenms-backup-restore-$PY_VER.tar.gz" "$HERE/README.md"; then
-    ok "README install command references $PY_VER"
+# The README must document BOTH ways to get the code: the release tarball
+# (carries the version) and the GitHub ZIP (folder name has no version).
+if grep -q "librenms-backup-restore-$PY_VER.tar.gz\|librenms-backup-restore-main" \
+    "$HERE/README.md"; then
+    ok "README documents how to obtain the code"
 else
-    bad "README install command does not reference $PY_VER"
+    bad "README does not document tarball or ZIP download"
+fi
+if grep -q -- "-main" "$HERE/README.md"; then
+    ok "README covers the GitHub ZIP folder name (-main)"
+else
+    bad "README does not warn about the ZIP folder name"
+fi
+if grep -q "chmod +x" "$HERE/README.md"; then
+    ok "README covers restoring the executable bit lost by ZIP"
+else
+    bad "README does not mention chmod +x for ZIP downloads"
 fi
 if sed -n '/^## \[/p' "$HERE/docs/CHANGELOG.md" | head -1 | grep -q "\[$PY_VER\]"; then
     ok "CHANGELOG has a $PY_VER section"

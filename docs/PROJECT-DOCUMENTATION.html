@@ -1002,7 +1002,8 @@ GET  /plugin-backuprestore.php?r=assets/…   <span class="c">← private CSS/JS
     the sudoers file is for the helper binary, with no arguments, so no caller
     can influence what it executes:
   </p>
-  <pre><code>Defaults:librenms !requiretty
+  <pre><code><span class="c"># NOT !requiretty / !logfile: sudo-rs (Ubuntu 26.04 default) rejects the
+# whole file on an unknown Defaults option. Both were no-ops anyway.</span>
 Defaults:librenms env_reset
 librenms ALL=(root) NOPASSWD: /usr/local/libexec/librenms-backup/br-helper
 

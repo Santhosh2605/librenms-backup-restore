@@ -3,6 +3,7 @@
 #
 # Install to: /etc/sudoers.d/librenms-backup      (root:root 0440)
 # Validate : visudo -c -f /etc/sudoers.d/librenms-backup
+# Works with sudo 1.9.x and with sudo-rs (Ubuntu 26.04 default).
 #
 # WHO NEEDS ROOT
 # --------------
@@ -24,10 +25,21 @@
 #   * Installer runs as root and is idempotent (scripts/install.sh).
 # ---------------------------------------------------------------------------
 
-Defaults:librenms !requiretty
+# ---------------------------------------------------------------------------
+# PORTABILITY: sudo (original) vs sudo-rs
+#
+# Ubuntu 26.04 ships sudo-rs as the default `sudo`. sudo-rs implements a subset
+# of the sudoers grammar and REJECTS the whole file if one Defaults option is
+# unknown to it. `!requiretty` and `!logfile` are both unsupported there, which
+# makes visudo fail with "unknown setting" and blocks the install.
+#
+# Both lines below are therefore omitted:
+#   * requiretty defaults to off in sudo 1.9+ anyway, so the line was a no-op.
+#   * logfile is not set anywhere by default, so disabling it was a no-op.
+# The two Defaults that remain (env_reset, secure_path) are supported by both.
+# ---------------------------------------------------------------------------
 Defaults:librenms env_reset
 Defaults:librenms secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Defaults:librenms !logfile
 
 # The single escalation path for the worker.  NOEXEC would break the helper's
 # own exec of mariadb-dump/systemctl, so it is intentionally not used; instead

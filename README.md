@@ -12,6 +12,22 @@ This plugin treats the backup as a product: it is encrypted, it is verified at
 three levels, every restore is preceded by a recovery checkpoint, and the restore
 itself cannot leave your database empty if it fails.
 
+## Install in one minute
+
+```bash
+sudo apt-get install -y python3 python3-pymysql python3-cryptography zstd age mariadb-client unzip
+cd /tmp && sudo unzip -o ~/librenms-backup-restore-main.zip
+sudo chmod +x /tmp/librenms-backup-restore-main/scripts/*.sh
+cd /tmp/librenms-backup-restore-main && sudo ./scripts/install.sh
+```
+
+Then **save your encryption key** (`/etc/librenms-backup/keys/identity.txt`)
+somewhere off the server — without it, backups cannot be restored.
+
+New to Linux, or hit a `Permission denied`? Follow the
+**[step-by-step guide](docs/INSTALL-STEP-BY-STEP.md)** instead — it explains
+each command and has a troubleshooting table.
+
 ## What it does
 
 - **Five components, selectable per run** — database, RRD, application, system,
@@ -27,6 +43,98 @@ itself cannot leave your database empty if it fails.
   checkpoint, and retention never deletes one.
 - **A real UI** — seven tabs: dashboard, history, manage, restore, scheduler,
   audit, settings. REST API underneath, so it is scriptable.
+
+## Architecture
+
+Four tiers with a deliberately narrow waist: the web tier requests, the worker
+executes, the helper escalates. Nothing skips a layer.
+
+```mermaid
+flowchart LR
+    subgraph B["Browser"]
+        UI["Admin UI<br/>7 tabs"]
+    end
+
+    subgraph W["Web tier · www-data · no privilege"]
+        FC["Front controller"]
+        CTL["22 routes<br/>CSRF + admin gate"]
+        ORM["Eloquent models"]
+    end
+
+    subgraph K["Worker · librenms"]
+        DISP["Dispatcher<br/>systemd timer"]
+        WK["Backup · verify<br/>restore"]
+        PIPE["tar → zstd → age<br/>BRENC1"]
+    end
+
+    subgraph H["Root helper · only escalation"]
+        SOCK["Unix socket<br/>HMAC-SHA256"]
+        OPS["20 operations"]
+        POL["Path allowlist"]
+    end
+
+    DB[("MariaDB")]
+    FS[("Archives +<br/>checkpoints")]
+    APP[("/opt/librenms")]
+
+    UI --> FC --> CTL --> ORM
+    ORM -->|"job row"| DB
+    DISP -->|"claim"| DB
+    DISP --> WK --> PIPE
+    WK -->|"sudo"| SOCK --> OPS --> POL
+    PIPE --> FS
+    POL --> DB
+    POL --> FS
+    POL --> APP
+```
+
+The point of that shape is the privilege boundary. The web tier can write a row
+to `br_jobs` and nothing more — it cannot run a command, read an archive, or
+touch the filesystem. Everything on the right of the diagram happens either as
+the unprivileged `librenms` user or behind the helper's socket, and every path
+the helper touches is checked against an allowlist first.
+
+### Component reference
+
+| Component | Runs as | Responsibility | Code |
+|---|---|---|---|
+| **Admin UI** | browser | 7 tabs, REST calls, no server-side logic | `plugin/resources/views/` |
+| **Front controller** | `www-data` | Boots LibreNMS's Laravel app and attaches the plugin's route table | `front-controller/` |
+| **22 API routes** | `www-data` | Read endpoints, mutations, CSRF, `admin` gate | `plugin/Controllers/` |
+| **Eloquent models** | `www-data` | The 7 `br_*` tables | `plugin/Models/` |
+| **Dispatcher** | `librenms` | Timer-driven; claims queued jobs and spawns one worker each | `worker/br/worker.py` |
+| **Worker** | `librenms` | Backup, verify, restore, retention | `worker/br/` |
+| **Archive pipeline** | `librenms` | `tar → zstd → age → BRENC1`, streaming, constant memory | `worker/br/writer.py`, `crypto.py` |
+| **Root helper** | `root` | 20 operations over a unix socket, HMAC-signed | `worker/br/helper.py` |
+| **Path allowlist** | `root` | Rejects traversal, `/` as a target, and anything outside the configured roots | `helper.py` (`PathPolicy`) |
+
+### Data flow, in words
+
+1. **Backup** — the UI `POST`s a request; the web tier writes one row to
+   `br_jobs` and returns immediately. The dispatcher timer claims the row and
+   starts a worker. The worker collects components, streams them through
+   compression and encryption, writes the archive and its sidecars, verifies it,
+   and records the result.
+2. **Restore** — the UI `POST`s with a typed confirmation; preflight runs seven
+   checks, then the worker drives the nine-stage state machine. Privileged steps
+   (import the database, install trees, restart services) go through the helper.
+   A verified checkpoint is taken before anything is modified.
+3. **Verify** — retrieves the archive, checks the container, every member's
+   SHA-256, and at `deep` level gunzips the SQL dump to confirm its schema
+   statements and terminator.
+
+For a terminal-only view of the same diagram:
+
+```
+ Browser ──HTTPS──▶ Front controller ──▶ 22 routes ──▶ Models ──▶ MariaDB
+                                                                   ▲
+                                                                   │ claim
+ Dispatcher (timer) ──▶ Worker ──▶ tar → zstd → age → BRENC1 ──▶ Archives
+                          │
+                          └──sudo──▶ Unix socket ──▶ 20 ops ──▶ Path allowlist
+                                                                   │
+                                              MariaDB ◀────────────┴──▶ /opt/librenms
+```
 
 ## Why the privilege model is unusual
 
@@ -44,27 +152,90 @@ with HMAC-SHA256, validates every field, and executes argv lists — never a she
 See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model, including what
 it deliberately does *not* protect against.
 
-## Quick start
+## Install
+
+**New to Linux?** Read [docs/INSTALL-STEP-BY-STEP.md](docs/INSTALL-STEP-BY-STEP.md)
+instead — it explains every command, including what to do when the menu entry
+does not appear.
+
+### 1. Prerequisites
 
 ```bash
-sudo apt-get install -y python3 zstd age python3-cryptography mariadb-client
-sudo tar -xzf librenms-backup-restore-1.0.1.tar.gz -C /opt/librenms-backup-restore --strip-components=1
-cd /opt/librenms-backup-restore
-sudo ./scripts/install.sh
-
-# keys: keep identity.txt OFF this host
-sudo age-keygen -o /etc/librenms-backup/keys/identity.txt
-sudo chown root:librenms /etc/librenms-backup/keys/identity.txt && sudo chmod 0640 /etc/librenms-backup/keys/identity.txt
-echo 'age1...' | sudo tee /etc/librenms-backup/keys/recipients.txt
-
-sudo -u librenms php /opt/librenms-backup-restore/scripts/br-schema.php install
-sudo systemctl enable --now br-helper.service \
-    librenms-backup-dispatch.timer librenms-backup-scheduler.timer
-sudo ./scripts/validate-install.sh
+sudo apt-get update
+sudo apt-get install -y python3 python3-pymysql python3-cryptography \
+                        zstd age mariadb-client unzip
 ```
 
-Then open **LibreNMS → Plugins → Backup & Restore**. Full detail, including
-Ubuntu 26.04 / PHP 8.5 notes: [docs/INSTALL.md](docs/INSTALL.md).
+### 2. Get the code
+
+**Downloading a ZIP from GitHub** (no `git` needed):
+
+```bash
+cd /tmp
+sudo unzip -o ~/librenms-backup-restore-main.zip
+sudo chmod +x /tmp/librenms-backup-restore-main/scripts/*.sh
+cd /tmp/librenms-backup-restore-main
+```
+
+> A GitHub ZIP unpacks to **`librenms-backup-restore-main`**; a release tarball
+> unpacks to **`librenms-backup-restore-1.0.1`**. Same code, different folder
+> name — use whatever `ls` shows.
+>
+> ZIP files do not keep the executable bit, so `chmod +x` is required. Without
+> it, `./scripts/install.sh` fails with `Permission denied`.
+
+**Or clone:**
+
+```bash
+cd /tmp && sudo git clone https://github.com/<you>/librenms-backup-restore.git
+cd librenms-backup-restore
+```
+
+### 3. Install
+
+```bash
+sudo ./scripts/install.sh
+```
+
+If that says `Permission denied`, the executable bit was lost — use
+`sudo bash scripts/install.sh` instead. It does exactly the same thing.
+
+LibreNMS somewhere other than `/opt/librenms`:
+
+```bash
+sudo LIBRENMS_ROOT=/srv/librenms ./scripts/install.sh
+```
+
+The installer runs twelve steps, creating its own configuration, encryption
+key, sudo rule, systemd units, the plugin's seven tables, and then validating
+the result. It is idempotent — re-running it is safe.
+
+### 4. Save the encryption key — do this now
+
+```
+warn  OFFLINE COPY REQUIRED: store /etc/librenms-backup/keys/identity.txt
+      somewhere safe NOW.
+```
+
+```bash
+sudo cat /etc/librenms-backup/keys/identity.txt     # copy into a password manager
+```
+
+Without this key your backups cannot be restored, and it is deliberately never
+exported by the helper. **Do not run `age-keygen` again** — the installer has
+already created it, and a second key would silently orphan every existing
+archive.
+
+### 5. Open it
+
+**LibreNMS → Plugins → Backup & Restore**, then **Backup Management → Run
+backup**, and finally **Restore** to rehearse once while everything is calm.
+
+Menu entry missing? `sudo -u librenms php /opt/librenms/artisan config:clear`
+
+Full detail: [docs/INSTALL.md](docs/INSTALL.md) ·
+permissions: [docs/DEPLOYMENT-MAP.md](docs/DEPLOYMENT-MAP.md) ·
+Ubuntu 26.04 / sudo-rs notes: [docs/INSTALL-STEP-BY-STEP.md](docs/INSTALL-STEP-BY-STEP.md)
 
 ## Documentation
 

@@ -86,11 +86,20 @@
                 var json;
                 try { json = JSON.parse(text); }
                 catch (e) {
-                    throw new Error("Unexpected server response (" + res.status + "): " +
-                        text.slice(0, 200).replace(/<[^>]*>/g, " "));
+                    // Not JSON: almost always a PHP fatal before our handler
+                    // ran. Keep the message short but actionable - the old
+                    // "Unexpected server response (500)" told the operator
+                    // nothing about where to look.
+                    var hint = res.status >= 500
+                        ? " - check the LibreNMS log on the host"
+                        : "";
+                    throw new Error("Server returned HTML instead of JSON (HTTP " +
+                        res.status + ")" + hint);
                 }
                 if (!res.ok || json.status === "error") {
-                    throw new Error(json.message || ("request failed (" + res.status + ")"));
+                    var msg = json.message || ("request failed (" + res.status + ")");
+                    if (json.log) msg += " — see " + json.log;
+                    throw new Error(msg);
                 }
                 return json.data;
             });

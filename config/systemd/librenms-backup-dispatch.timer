@@ -1,6 +1,6 @@
 [Unit]
 Description=LibreNMS Backup & Restore queue dispatcher (every 15s)
-Documentation=file:/opt/librenms-backup-restore/docs/ARCHITECTURE.md
+Documentation=file:@BR_PREFIX@/docs/ARCHITECTURE.md
 
 [Timer]
 OnBootSec=60s

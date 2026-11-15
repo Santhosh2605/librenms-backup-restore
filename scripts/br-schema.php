@@ -140,8 +140,14 @@ switch ($command) {
         foreach (br_tables() as $table => $exists) {
             printf("  %-16s %s\n", $table, $exists ? 'OK' : 'MISSING');
         }
+        // Exit status must reflect the END STATE, not whether work was done.
+        // A table that is still missing is a real failure even if this run
+        // "did work"; and if every table is present there is nothing to fix.
         $allPresent = ! in_array(false, array_values(br_tables()), true);
-        exit(($didWork || $allPresent) ? 0 : 1);
+        if (! $allPresent) {
+            fwrite(STDERR, "One or more br_* tables are missing - install incomplete.\n");
+        }
+        exit($allPresent ? 0 : 1);
 
     case 'status':
         echo "Database: " . DB::connection()->getDatabaseName() . "\n";

@@ -60,7 +60,18 @@ fi
 hdr "3. Sudoers"
 check_file /etc/sudoers.d/librenms-backup
 check_perm /etc/sudoers.d/librenms-backup 440
-visudo -cf /etc/sudoers.d/librenms-backup >/dev/null 2>&1 && ok "sudoers syntax valid" || bad "invalid sudoers file"
+visudo -cf /etc/sudoers.d/librenms-backup >/dev/null 2>&1 \
+    && ok "sudoers syntax valid" || bad "invalid sudoers file"
+
+# The file can be syntactically valid yet still not grant the one command the
+# worker needs. Exercise the actual rule rather than trusting the parse.
+if sudo -n -l -U "$APP_USER" 2>/dev/null | grep -q "br-helper"; then
+    ok "worker can run br-helper via sudo (rule is effective)"
+else
+    sudo -n -l -U "$APP_USER" 2>/dev/null | grep -q "NOPASSWD" \
+        && bad "br-helper missing from $APP_USER's sudo rules" \
+        || warn "could not query sudo rules for $APP_USER (needs root)"
+fi
 
 hdr "4. Configuration and key material"
 check_file "$CONF_DIR/br.conf"
@@ -87,7 +98,33 @@ for d in "$BACKUP_ROOT" "$BACKUP_ROOT/archives" "$BACKUP_ROOT/staging" \
          "$BACKUP_ROOT/recovery-checkpoints"; do
     check_dir "$d"
 done
-check_owner "$BACKUP_ROOT/archives" "root:$APP_USER"
+# archives/ must be writable by the WORKER, which runs as $APP_USER. With mode
+# 0750 the group only gets r-x, so `root:$APP_USER` would be read-only for the
+# worker and every backup would fail at the first write. The installer creates
+# these as $APP_USER:$APP_GROUP for that reason - check for that, and treat a
+# root-owned archives/ as the problem rather than the target.
+for d in archives staging recovery-checkpoints; do
+    check_owner "$BACKUP_ROOT/$d" "$APP_USER:$APP_GROUP"
+done
+# The root of the tree stays root-owned so the layout cannot be replaced.
+check_owner "$BACKUP_ROOT" "root:$APP_GROUP"
+
+# Ownership is a proxy; the thing that actually matters is whether the worker
+# can write. Test it as the worker, which catches ownership AND mode together
+# (and would have caught the old root:librenms expectation, which was wrong).
+if [[ $EUID -eq 0 ]] && id "$APP_USER" >/dev/null 2>&1; then
+    for d in archives staging recovery-checkpoints; do
+        probe="$BACKUP_ROOT/$d/.br-write-probe.$$"
+        if sudo -u "$APP_USER" -- touch "$probe" 2>/dev/null; then
+            rm -f "$probe"
+            ok "worker can write $BACKUP_ROOT/$d"
+        else
+            bad "worker CANNOT write $BACKUP_ROOT/$d - backups will fail"
+        fi
+    done
+else
+    warn "not root: skipped the worker write test on $BACKUP_ROOT"
+fi
 chmod_check=$(stat -c '%a' "$BACKUP_ROOT/archives" 2>/dev/null)
 [[ "$chmod_check" == "750" || "$chmod_check" == "755" ]] && ok "backup dir mode $chmod_check" \
     || warn "backup dir mode $chmod_check (expected 750)"

@@ -1,6 +1,6 @@
 [Unit]
 Description=LibreNMS Backup & Restore privileged helper
-Documentation=file:/opt/librenms-backup-restore/docs/SECURITY.md
+Documentation=file:@BR_PREFIX@/docs/SECURITY.md
 After=network.target mariadb.service
 Wants=mariadb.service
 # The helper must never be restarted automatically while a restore runs.
@@ -11,7 +11,7 @@ Type=simple
 User=root
 Group=root
 Environment=BR_CONF=/etc/librenms-backup/br.conf
-Environment=PYTHONPATH=/opt/librenms-backup-restore/worker
+Environment=PYTHONPATH=@BR_PREFIX@/worker
 ExecStart=/usr/bin/python3 -m br.helper
 Restart=on-failure
 RestartSec=3
@@ -23,20 +23,20 @@ ProtectHome=read-only
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-# A restore legitimately writes /etc, /opt/librenms, /var/lib and our own
+# A restore legitimately writes /etc, @BR_LIBRENMS_ROOT@, /var/lib and our own
 # state/log/backup trees. ProtectSystem=full would mount /etc and /usr
 # read-only and make every restore fail at RESTORING_CONFIGURATION, so the
 # filesystem must stay writable; the constraint is the helper's path allowlist
 # (see PathPolicy in worker/br/helper.py), which is enforced on every call.
 ProtectSystem=no
-# /run/librenms-backup  socket + HMAC secret
-# /var/lib/librenms-backup  worker health + restore lock
-# /var/backups/librenms     archives, checkpoints, staging
-# /var/log/librenms-backup  helper and worker logs
+# @BR_RUN_DIR@  socket + HMAC secret
+# @BR_STATE_DIR@  worker health + restore lock
+# @BR_BACKUP_ROOT@     archives, checkpoints, staging
+# @BR_LOG_DIR@  helper and worker logs
 # /etc                      restored system configuration
-# /opt/librenms             restored application tree and RRD data
-ReadWritePaths=/run/librenms-backup /var/lib/librenms-backup /var/backups/librenms \
-               /var/log/librenms-backup /etc /opt/librenms
+# @BR_LIBRENMS_ROOT@             restored application tree and RRD data
+ReadWritePaths=@BR_RUN_DIR@ @BR_STATE_DIR@ @BR_BACKUP_ROOT@ \
+               @BR_LOG_DIR@ /etc @BR_LIBRENMS_ROOT@
 RestrictAddressFamilies=AF_UNIX
 RestrictSUIDSGID=yes
 LockPersonality=yes

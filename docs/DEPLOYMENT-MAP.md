@@ -136,11 +136,18 @@ directory root itself.
 ### 3.3 The sudoers grant
 
 ```
-Defaults:librenms !requiretty
 Defaults:librenms env_reset
 Defaults:librenms secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 librenms ALL=(root) NOPASSWD: /usr/local/libexec/librenms-backup/br-helper
 ```
+
+> **Do not add `!requiretty` or `!logfile`.** Ubuntu 26.04 ships **sudo-rs**,
+> which implements a subset of the sudoers grammar and rejects the *entire file*
+> if any `Defaults` option is unknown to it. Either line produces
+> `unknown setting: 'requiretty'` and blocks the install — and because a
+> rejected file in `/etc/sudoers.d` stops `sudo` working altogether, a careless
+> copy can lock you out. Both lines are no-ops on sudo 1.9+ (where `requiretty`
+> already defaults off and no `logfile` is configured).
 
 One line, no arguments, so a caller cannot influence what runs. The wrapper is
 three lines and does nothing but `exec /usr/bin/python3 -m br.helper "$@"` —

@@ -3,6 +3,26 @@
 Target: **Ubuntu 26.04 / PHP 8.5**, also validated on Debian 13 / PHP 8.4.
 Existing LibreNMS install assumed (validated against `dd4cebd7`).
 
+## sudo-rs on Ubuntu 26.04
+
+Ubuntu 26.04 defaults to **sudo-rs**, which accepts only a subset of the sudoers
+grammar. It rejects the whole file when it meets a `Defaults` option it does not
+implement — `requiretty` and `logfile` among them — and any invalid file in
+`/etc/sudoers.d` stops `sudo` working entirely.
+
+`config/br-sudoers` therefore uses only `env_reset` and `secure_path`, and
+`install.sh` validates the policy in a scratch file before installing it. If your
+host still rejects it, the installer falls back to a minimal policy with no
+`Defaults` at all and the same two rules.
+
+Check yours with:
+
+```bash
+sudo -V | head -2        # "Sudo version 1.9.x" = original sudo
+                         # sudo-rs reports "sudo-rs <version>"
+visudo -c -f /etc/sudoers.d/librenms-backup
+```
+
 ## 1. Requirements
 
 | Component | Minimum | Notes |

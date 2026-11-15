@@ -4,15 +4,15 @@ After=mariadb.service
 
 [Service]
 Type=oneshot
-User=librenms
-Group=librenms
+User=@BR_APP_USER@
+Group=@BR_APP_GROUP@
 Environment=BR_CONF=/etc/librenms-backup/br.conf
-Environment=PYTHONPATH=/opt/librenms-backup-restore/worker
-WorkingDirectory=/opt/librenms-backup-restore/worker
+Environment=PYTHONPATH=@BR_PREFIX@/worker
+WorkingDirectory=@BR_PREFIX@/worker
 ExecStart=/usr/bin/python3 -m br.worker dispatch
 TimeoutStartSec=120
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
-ReadWritePaths=/var/backups/librenms /var/log/librenms-backup /var/lib/librenms-backup /run/librenms-backup
+ReadWritePaths=@BR_BACKUP_ROOT@ @BR_LOG_DIR@ @BR_STATE_DIR@ @BR_RUN_DIR@
 UMask=0027

@@ -3,6 +3,88 @@
 All notable changes to this project. Format follows Keep a Changelog; versions
 use semantic versioning.
 
+## [1.0.2] — 2026-11-11
+
+### Fixed — user and path overrides were silently ignored
+
+The systemd units hardcoded `User=librenms`, `Group=librenms` and
+`/opt/librenms-backup-restore`. Passing `APP_USER=` or `PREFIX=` therefore
+changed what the installer *printed* but not what actually got installed: the
+worker kept running as `librenms` while writing files chowned to the override,
+and a non-default prefix produced units pointing at a directory that did not
+exist.
+
+The units are now templates (`@BR_APP_USER@`, `@BR_PREFIX@`, …) rendered from
+the values in force, and rendering **fails the install** if any placeholder
+survives. `br.conf` is templated the same way, so `librenms_user`,
+`librenms_group`, `state_dir` and `log_dir` all follow the override.
+
+Defaults render byte-identically to the previous units, so an install at
+`/opt/librenms` owned by `librenms` is unchanged.
+
+### Fixed — the rollback could restore the very file that caused the outage
+
+If `/etc/sudoers.d/librenms-backup` was already invalid (the usual reason to
+re-run the installer), the rollback path copied it back and reported "sudo is
+working again" — which it would not have been. The previous file is now only
+treated as restorable when this host's `visudo` accepts it; otherwise it is kept
+aside as `.br-broken` and the install removes the file entirely on failure,
+which is the only genuinely safe state.
+
+### Fixed — the error hint named a log file that does not exist
+
+The new 500 handler told operators to check `storage/logs/librenms.log`, and
+LibreNMS does not write there. Its channel is
+`env('APP_LOG', base_path('logs/librenms.log'))` (config/logging.php), and
+`storage/logs/` is empty on a real install. The front controller now resolves
+the path from the app's own config, falls back through the locations LibreNMS
+has used, and returns it in the JSON (`"log": "/opt/librenms/logs/librenms.log"`)
+so nobody has to guess again.
+
+### Fixed — a 500 from the API now says what failed
+
+`GET /plugin-backuprestore.php?r=backups` (Backup History) and `?r=restores`
+returned Laravel's HTML error page with a bare HTTP 500, so the GUI could only
+say "Unexpected server response (500)" and the cause stayed hidden in
+`storage/logs/librenms.log`. The front controller now registers a `renderable`
+exception callback: API requests get JSON carrying the exception class, message
+and `file:line` inside the plugin. A plain `try/catch` around `handle()` does
+**not** work — Laravel's handler converts the throwable to a response first, so
+the callback has to be registered with the handler itself.
+
+A missing asset is now reported as 404 rather than 500 (a mistyped filename
+looked like a broken install), and framework-internal file paths are withheld.
+
+### Fixed — the validator warned about the correct ownership
+
+`validate-install.sh` reported `WARN owner librenms:librenms .../archives
+(expected root:librenms)` on every install. The installer was right and the
+validator was wrong: with mode `0750` a `root:librenms` directory grants the
+group only `r-x`, so the worker could not write and *every backup would fail*.
+An administrator "fixing" the warning would have broken backups. The check now
+expects `$APP_USER:$APP_GROUP`, and a write probe as the worker replaces
+ownership as the primary signal — that catches ownership and mode together.
+
+### Fixed — "back up your keys" did not say which file
+
+The installer's closing summary said `Keys : /etc/librenms-backup/keys/
+(BACK THESE UP OFFLINE)`. Only `identity.txt` can decrypt archives;
+`recipients.txt` is the public half. The summary and the step-by-step guide now
+name the file explicitly and say what the other two are.
+
+### Fixed — documentation still printed the rejected line
+
+`docs/DEPLOYMENT-MAP.md` and `docs/PROJECT-DOCUMENTATION.html` both showed
+`Defaults:librenms !requiretty` in a copyable snippet. Copying from either
+reproduced the exact `unknown setting` failure. Both now print only the portable
+form, with the reason spelled out. `check-package.sh` fails if any doc prints the
+line again.
+
+### Documented — the three-user model
+
+`docs/INSTALL-STEP-BY-STEP.md` now explains `root` / `librenms` / `www-data`
+and why the web tier deliberately cannot read `br.conf` or the encryption key.
+
 ## [1.0.1] — 2026-11-11
 
 Rehearsal-driven release. Every item below was found by running a real restore
@@ -60,6 +142,40 @@ failure, or reported success while doing nothing.
   The engine now reconciles from disk (`adopt_orphans`) before completing.
 - **`adopt` exit status.** The command returned the adoption *count*, so
   "0 archives to adopt" exited non-zero.
+
+### Fixed — reported from a real Ubuntu 26.04 install
+
+The first install on the actual target platform failed at step 6. Recorded
+verbatim so the cause is not re-derived.
+
+- **`visudo` rejected the sudoers file: `unknown setting: 'requiretty'`.**
+  Ubuntu 26.04 ships **sudo-rs** as the default `sudo`, which implements a
+  subset of the sudoers grammar and rejects the *entire file* when it meets a
+  `Defaults` option it does not know. Both `!requiretty` and `!logfile` are
+  unsupported there. Both lines were also no-ops — `requiretty` defaults to off
+  in sudo 1.9+, and no `logfile` is set anywhere by default — so they are simply
+  removed. The two remaining Defaults (`env_reset`, `secure_path`) are supported
+  by sudo-rs and by sudo 1.9.x.
+- **The installer wrote the sudoers file before validating it.** Any invalid
+  file in `/etc/sudoers.d` makes `sudo` refuse to run at all, so a failed
+  validation locks the administrator out. Validation now happens in a scratch
+  file; only a file that `visudo` accepts is moved into place, and the previous
+  file is kept until the combined `/etc/sudoers` parses cleanly.
+- **Automatic fallback.** If a host rejects the full policy, the installer
+  retries with a minimal form containing no `Defaults` at all — identical rules,
+  nothing to object to. If that also fails it aborts with `sudo` untouched.
+- **`br-schema.php` could exit 0 with tables missing.** The status was
+  `($didWork || $allPresent)`, so a run that "did work" reported success even if
+  a table was still absent. Now the exit status reflects the end state, and
+  `install.sh` follows up with an independent `br-schema.php status` check.
+- **The helper's socket was never verified at install time.** systemd reporting
+  `active` is not the same as the socket being usable. `install.sh` now waits
+  for `/run/librenms-backup/br-helper.sock` and says so plainly if it never
+  appears.
+
+`check-package.sh` gained a "Sudo policy portability" section: it fails if
+`requiretty`/`logfile` return to `config/br-sudoers`, or if validation stops
+happening before the file is installed.
 
 ### Fixed — found by the pre-release audit
 

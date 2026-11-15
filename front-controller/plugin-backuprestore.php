@@ -177,6 +177,99 @@ if ($resource !== '') {
     );
 }
 
-$response = tap($kernel->handle($request))->send();
+// ---------------------------------------------------------------------------
+// Where does this install actually write its log?
+//
+// It is NOT storage/logs/laravel.log: LibreNMS uses its own channel whose path
+// is `env('APP_LOG', base_path('logs/librenms.log'))` (see config/logging.php).
+// Telling an operator to grep a path that does not exist wastes the one thing
+// they need in an outage, so resolve it from the app's own config and fall back
+// through the paths LibreNMS has used over time.
+// ---------------------------------------------------------------------------
+$logPath = (function () use ($app): string {
+    try {
+        $path = $app->make('config')->get('logging.channels.log_file.path');
+        if (is_string($path) && $path !== '') {
+            return $path;
+        }
+    } catch (\Throwable) {
+        // fall through
+    }
+    foreach ([
+        base_path('logs/librenms.log'),
+        storage_path('logs/librenms.log'),
+        storage_path('logs/laravel.log'),
+    ] as $candidate) {
+        if (is_file($candidate)) {
+            return $candidate;
+        }
+    }
 
-$kernel->terminate($request, $response);
+    return base_path('logs/librenms.log');
+})();
+
+// ---------------------------------------------------------------------------
+// Failure reporting.
+//
+// Any uncaught Throwable used to surface as LibreNMS' HTML error page with a
+// bare HTTP 500, so the GUI could only report "Unexpected server response
+// (500)" and the browser console showed nothing useful. The one line that
+// matters was buried in logs/librenms.log.
+//
+// Laravel's exception handler swallows the throwable and returns a rendered
+// response, so a try/catch around handle() never runs. The supported hook is
+// `renderable`: a callback that decides how a given throwable becomes a
+// response. For our API requests we return JSON carrying the exception class,
+// message and the file:line inside OUR code. The trace goes to the log only.
+// ---------------------------------------------------------------------------
+$wantsJson = ($resource !== '')
+    || str_contains($request->getRequestUri(), '/br/');
+
+if ($wantsJson) {
+    try {
+        $handler = $app->make(\Illuminate\Contracts\Debug\ExceptionHandler::class);
+        if (method_exists($handler, 'renderable')) {
+            $handler->renderable(function (\Throwable $e, $req) use ($logPath) {
+                // Only JSON for our own namespace; core LibreNMS errors keep
+                // their normal rendering.
+                $uri = $req->getRequestUri();
+                if (! isset($_GET['r']) && ! str_contains($uri, '/br/')) {
+                    return null;
+                }
+                // A 404 is a client mistake, not a server fault. Reporting it
+                // as 500 made a mistyped asset name look like a broken install.
+                $notFound = $e instanceof \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+                $status = $notFound ? 404 : 500;
+                if (! headers_sent()) {
+                    http_response_code($status);
+                    header('Content-Type: application/json; charset=utf-8');
+                }
+                // Only expose the location when it is inside our own plugin;
+                // a framework path is noise (and version-revealing).
+                $file = $e->getFile();
+                $ours = str_contains($file, 'Plugins/BackupRestore');
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $notFound
+                        ? 'not found'
+                        : 'internal error: ' . $e->getMessage(),
+                    'exception' => $e::class,
+                    'at' => $ours ? basename($file) . ':' . $e->getLine() : null,
+                    'hint' => $notFound ? null : 'full trace in ' . ($logPath ?? 'the LibreNMS log'),
+                    'log' => $notFound ? null : ($logPath ?? null),
+                ], $status, [], JSON_UNESCAPED_SLASHES);
+            });
+        }
+    } catch (\Throwable) {
+        // Never let diagnostics machinery break the request.
+    }
+}
+
+try {
+    $response = tap($kernel->handle($request))->send();
+    $kernel->terminate($request, $response);
+} catch (\Throwable $e) {
+    report($e);
+    throw $e; // nothing more we can safely do
+}
