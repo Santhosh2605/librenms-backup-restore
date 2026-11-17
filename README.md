@@ -12,21 +12,81 @@ This plugin treats the backup as a product: it is encrypted, it is verified at
 three levels, every restore is preceded by a recovery checkpoint, and the restore
 itself cannot leave your database empty if it fails.
 
-## Install in one minute
+## Install and set up
+
+Follow these steps on the Linux server that already runs LibreNMS. You need an
+administrator account that can use `sudo`. The commands below assume LibreNMS
+is installed at `/opt/librenms` and that the LibreNMS service account is named
+`librenms`.
+
+### 1. Install the required packages
+
+On Ubuntu or Debian, run:
 
 ```bash
-sudo apt-get install -y python3 python3-pymysql python3-cryptography zstd age mariadb-client unzip
-cd /tmp && sudo unzip -o ~/librenms-backup-restore-main.zip
-sudo chmod +x /tmp/librenms-backup-restore-main/scripts/*.sh
-cd /tmp/librenms-backup-restore-main && sudo ./scripts/install.sh
+sudo apt-get update
+sudo apt-get install -y git python3 python3-pymysql python3-cryptography \
+                        zstd age mariadb-client rsync
 ```
 
-Then **save your encryption key** (`/etc/librenms-backup/keys/identity.txt`)
-somewhere off the server — without it, backups cannot be restored.
+### 2. Download the project
 
-New to Linux, or hit a `Permission denied`? Follow the
-**[step-by-step guide](docs/INSTALL-STEP-BY-STEP.md)** instead — it explains
-each command and has a troubleshooting table.
+```bash
+cd /tmp
+git clone https://github.com/Santhosh2605/librenms-backup-restore.git
+cd librenms-backup-restore
+```
+
+### 3. Run the installer
+
+```bash
+sudo bash scripts/install.sh
+```
+
+When asked `Continue? [y/N]`, type `y` and press Enter. The installer adds the
+plugin to LibreNMS, creates its database tables and encryption key, and enables
+the background services. It does not replace LibreNMS itself.
+
+If LibreNMS is installed somewhere other than `/opt/librenms`, pass its path:
+
+```bash
+sudo LIBRENMS_ROOT=/srv/librenms bash scripts/install.sh
+```
+
+### 4. Save the encryption key off the server
+
+With the packages above, the installer uses `age` and creates this private key:
+
+```text
+/etc/librenms-backup/keys/identity.txt
+```
+
+Copy the file's contents into a secure password manager or other safe offline
+storage. **You need this key to decrypt your backups.** Never commit it to GitHub
+or leave your only copy on the LibreNMS server. Do not generate a replacement
+key after backups have been created.
+
+If the installer says it is using the passphrase fallback instead, save
+`/etc/librenms-backup/keys/passphrase` in the same way.
+
+### 5. Open the plugin and make a backup
+
+1. Sign in to LibreNMS with an administrator account.
+2. Open **Plugins → Backup & Restore**.
+3. Choose **Run Full Backup Now** and wait for the job to complete.
+4. Verify that the backup is marked **verified**.
+5. Rehearse a restore on a test or staging server before relying on backups for
+   recovery.
+
+If the menu item does not appear, refresh LibreNMS's cached plugin list:
+
+```bash
+sudo -u librenms php /opt/librenms/artisan config:clear
+```
+
+For custom users, configuration options, and troubleshooting, see the
+[installation reference](docs/INSTALL.md). For restore and recovery instructions,
+see [RESTORE.md](docs/RESTORE.md).
 
 ## What it does
 
@@ -151,91 +211,6 @@ That helper speaks a closed JSON protocol over a unix socket, signs every messag
 with HMAC-SHA256, validates every field, and executes argv lists — never a shell.
 See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model, including what
 it deliberately does *not* protect against.
-
-## Install
-
-**New to Linux?** Read [docs/INSTALL-STEP-BY-STEP.md](docs/INSTALL-STEP-BY-STEP.md)
-instead — it explains every command, including what to do when the menu entry
-does not appear.
-
-### 1. Prerequisites
-
-```bash
-sudo apt-get update
-sudo apt-get install -y python3 python3-pymysql python3-cryptography \
-                        zstd age mariadb-client unzip
-```
-
-### 2. Get the code
-
-**Downloading a ZIP from GitHub** (no `git` needed):
-
-```bash
-cd /tmp
-sudo unzip -o ~/librenms-backup-restore-main.zip
-sudo chmod +x /tmp/librenms-backup-restore-main/scripts/*.sh
-cd /tmp/librenms-backup-restore-main
-```
-
-> A GitHub ZIP unpacks to **`librenms-backup-restore-main`**; a release tarball
-> unpacks to **`librenms-backup-restore-1.0.1`**. Same code, different folder
-> name — use whatever `ls` shows.
->
-> ZIP files do not keep the executable bit, so `chmod +x` is required. Without
-> it, `./scripts/install.sh` fails with `Permission denied`.
-
-**Or clone:**
-
-```bash
-cd /tmp && sudo git clone https://github.com/<you>/librenms-backup-restore.git
-cd librenms-backup-restore
-```
-
-### 3. Install
-
-```bash
-sudo ./scripts/install.sh
-```
-
-If that says `Permission denied`, the executable bit was lost — use
-`sudo bash scripts/install.sh` instead. It does exactly the same thing.
-
-LibreNMS somewhere other than `/opt/librenms`:
-
-```bash
-sudo LIBRENMS_ROOT=/srv/librenms ./scripts/install.sh
-```
-
-The installer runs twelve steps, creating its own configuration, encryption
-key, sudo rule, systemd units, the plugin's seven tables, and then validating
-the result. It is idempotent — re-running it is safe.
-
-### 4. Save the encryption key — do this now
-
-```
-warn  OFFLINE COPY REQUIRED: store /etc/librenms-backup/keys/identity.txt
-      somewhere safe NOW.
-```
-
-```bash
-sudo cat /etc/librenms-backup/keys/identity.txt     # copy into a password manager
-```
-
-Without this key your backups cannot be restored, and it is deliberately never
-exported by the helper. **Do not run `age-keygen` again** — the installer has
-already created it, and a second key would silently orphan every existing
-archive.
-
-### 5. Open it
-
-**LibreNMS → Plugins → Backup & Restore**, then **Backup Management → Run
-backup**, and finally **Restore** to rehearse once while everything is calm.
-
-Menu entry missing? `sudo -u librenms php /opt/librenms/artisan config:clear`
-
-Full detail: [docs/INSTALL.md](docs/INSTALL.md) ·
-permissions: [docs/DEPLOYMENT-MAP.md](docs/DEPLOYMENT-MAP.md) ·
-Ubuntu 26.04 / sudo-rs notes: [docs/INSTALL-STEP-BY-STEP.md](docs/INSTALL-STEP-BY-STEP.md)
 
 ## Documentation
 
