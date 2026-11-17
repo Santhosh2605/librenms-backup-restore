@@ -31,6 +31,128 @@ treated as restorable when this host's `visudo` accepts it; otherwise it is kept
 aside as `.br-broken` and the install removes the file entirely on failure,
 which is the only genuinely safe state.
 
+### Fixed — every Backup History request returned "400 invalid resource"
+### (approach revised — reported and fixed upstream by the operator)
+
+The first fix widened the allow-list to include `?`, `=` and `&`. The pragmatic
+but inferior option: it keeps the resource string carrying query data. The
+accepted fix splits an embedded query off *before* validating, parses it into the
+Laravel query bag, and then applies the original strict path allow-list
+(`[A-Za-z0-9._/-]`) to the path alone. Query parameters are data, not part of the
+resource, so they cannot widen the allow-list at all.
+
+Behaviour verified both ways: `?r=backups?limit=100` returns 200 and the
+controller sees `limit=100` (clamped by `min(200, max(1, (int)))`), while
+`../etc/passwd` and `http://evil/x` still return 400.
+
+
+
+The `?r=` validator whitelisted `[A-Za-z0-9._/-]`, but the GUI calls
+`api("backups?limit=100")` — so `?`, `=` and `&` were all rejected and the tab
+could never load. The allow-list now accepts a path plus a query string, while
+still refusing traversal, schemes, encoded separators and control characters.
+`%` is deliberately excluded: PHP has already decoded `$_GET`, so a remaining
+percent sign is a double-encoding attempt (`%2e%2e%2f`).
+
+Verified against every path the JS sends (all 200) and six attack shapes (all
+400).
+
+### Fixed — the real error was masked by a `request` container cascade
+
+Reported from a real host: every failure in the window between
+`kernel->bootstrap()` and `kernel->handle()` was logged as
+
+```
+FatalError: Uncaught ReflectionException: Class "request" does not exist
+Next BindingResolutionException: Target class [request] does not exist.
+  at HandleExceptions->renderHttpResponse()
+```
+
+Laravel binds the `request` singleton inside `Kernel::sendRequestThroughRouter()`,
+which runs only during `handle()`. So when an exception escapes *before* that
+point, the global handler can render neither the error nor its own explanation —
+and the operator is shown a container error that has nothing to do with the
+actual fault. The root cause was invisible.
+
+The front controller now binds the request immediately after `bootstrap()`, so
+the handler works in that window too. Verified: the same injected exception now
+logs as `RuntimeException THE REAL ROOT CAUSE @ .../plugin-backuprestore.php:240`
+instead of the `request` cascade.
+
+### Fixed — a bootstrap failure produced a 500 with no cause anywhere
+
+Everything in the front controller up to the exception handler ran outside
+Laravel. A failure in that window could not be caught by the framework, was not
+written to the LibreNMS log, and reached the browser as bare HTML — which is
+exactly the "Server returned HTML instead of JSON" symptom, with nothing to
+debug. A shutdown handler is now armed **before** any framework code and a
+`try` wraps autoload/bootstrap; both emit JSON naming the stage that failed, the
+`memory_limit` and the user. Verified against a catchable error and a genuine
+uncatchable OOM.
+
+### Added — the diagnostic inspects the FPM pool, and refuses to trust root
+
+A diagnostic run as `root` reports "all passed" no matter what the web tier can
+read, because root bypasses permissions. The script now says so in a banner and
+names the exact command to re-run as the pool user. It also reads
+`/etc/php/*/fpm/pool.d/*.conf` and reports the pool's `user`, `memory_limit`,
+`catch_workers_output` and passthrough `env[]` entries — CLI and FPM differ on
+all four, and an FPM memory-limit fatal is uncatchable, unwritable to the
+Laravel log, and can therefore only ever surface as an HTML 500.
+
+### Added — the diagnostic checks the WEB identity, not the caller's
+
+`diagnose.php` ran as whoever invoked it (typically `librenms`), while the plugin's
+HTTP surface executes as the php-fpm pool user. Testing as the wrong account
+proves nothing: `.env`, `logs/` and `storage/framework/views` were all readable
+as `librenms` and all unreadable as `www-data` on the same host. The script now
+detects the php-fpm user, warns loudly when they differ, and prints a permission
+matrix for every path the web tier touches (settings, health file, job log,
+`.env`, log dir, blade cache).
+
+### Fixed — the log directory was private to the worker
+
+`/var/lib/librenms-backup` and `/var/log/librenms-backup` were created `0750
+librenms:librenms`, so a web tier running as any other account could not list
+them, and worker-health/audit views degraded silently. Both are now `0755`
+(an equivalent `stat` check now runs in `diagnose.php` and reports the failure
+as a named error rather than a subtly empty panel).
+
+### Fixed — an incomplete `plugin/` tree silently wiped the installed plugin
+
+`rsync -a --delete "$SRC_DIR/plugin/" "$PLUGIN_DIR/"` empties the destination
+when the source is empty or partial, and the installer still printed
+`ok plugin files installed`. The result is an install that looks complete while
+every plugin class is missing — the web tier then 500s on every request, and the
+only symptom is
+`Target class [App\Plugins\BackupRestore\Controllers\BackupRestoreController] does not exist`.
+
+The source tree is now validated (Controllers/, Models/, Services/, Menu.php,
+Page.php) **before** anything is copied, the completed install is re-checked
+file by file afterwards, and either failure aborts with instructions instead of
+reporting success.
+
+`diagnose.php` gained a "Plugin files on disk" section that lists each expected
+file with its size, flags anything missing or unreadable, and shows the PSR-4
+mapping — so this class of failure names itself instead of surfacing as
+"class not found" nineteen times.
+
+### Fixed — install aborted at step 2 when the source tree *was* the prefix
+
+`install -m 0644 "$SRC_DIR/pytest.ini" "$PREFIX/pytest.ini"` aborts with
+`'...' and '...' are the same file` (exit 1, under `set -e`) whenever the
+download has been unpacked straight into `/opt/librenms-backup-restore` — which
+is the natural thing to do. The copy is now skipped when both paths resolve to
+the same inode.
+
+Two related hazards in the same step:
+
+- A front controller edited **in `$PREFIX`** was silently reverted to the source
+  copy on the next run. The installer now prefers whichever file is newer and
+  says so, so a hand-applied fix survives a re-install.
+- `plugin/` was required in `$SRC_DIR` only. It now falls back to
+  `$PREFIX/plugin`, and fails with an actionable message if neither exists.
+
 ### Fixed — the installer never reloaded PHP, so upgrades ran stale code
 
 PHP-FPM holds compiled bytecode in opcache. `install.sh` replaced files but never

@@ -52,16 +52,101 @@ if (file_exists(__DIR__ . '/../storage/framework/maintenance.php')) {
     require __DIR__ . '/../storage/framework/maintenance.php';
 }
 
-require __DIR__ . '/../vendor/autoload.php';
+// ---------------------------------------------------------------------------
+// Everything from here until the exception handler is registered runs OUTSIDE
+// Laravel. A failure in this window cannot be caught by the framework, is not
+// written to the LibreNMS log, and reaches the browser as a bare HTML 500 -
+// the "Server returned HTML instead of JSON" symptom with no cause anywhere.
+//
+// So: arm a shutdown handler BEFORE any framework code, and dump a real message
+// if we die unexpectedly. It is disarmed once normal handling takes over.
+// ---------------------------------------------------------------------------
+$brBootStage = 'autoload';
+$brBootDone = false;
+$brRequest = null;
 
-$app = require_once __DIR__ . '/../bootstrap/app.php';
+register_shutdown_function(function () use (&$brBootStage, &$brBootDone): void {
+    if ($brBootDone) {
+        return;
+    }
+    $err = error_get_last();
+    $fatal = $err !== null
+        && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true);
 
-// Routes can only be added to the route collection once the framework has
-// booted (the collection is created by the framework's route service provider).
-// bootstrap() followed by handle() below is the supported sequence and is
-// idempotent.
-$kernel = $app->make(Kernel::class);
-$kernel->bootstrap();
+    if (! headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode([
+        'status' => 'error',
+        'message' => $fatal
+            ? 'fatal before the framework started: ' . $err['message']
+            : 'the plugin entrypoint exited before the framework started',
+        'stage' => $brBootStage,
+        'at' => $fatal ? basename($err['file']) . ':' . $err['line'] : null,
+        'hint' => 'this is a bootstrap failure, so it never reached the LibreNMS log; '
+            . 'the "stage" above is the last step that was attempted',
+        'memory_limit' => ini_get('memory_limit'),
+        'user' => function_exists('posix_getpwuid')
+            ? (posix_getpwuid(posix_geteuid())['name'] ?? '?')
+            : '?',
+    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+}, 0);
+
+try {
+    $brBootStage = 'vendor/autoload.php';
+    require __DIR__ . '/../vendor/autoload.php';
+
+    $brBootStage = 'bootstrap/app.php';
+    $app = require_once __DIR__ . '/../bootstrap/app.php';
+
+    // Routes can only be added to the route collection once the framework has
+    // booted (the collection is created by the framework's route service
+    // provider). bootstrap() followed by handle() below is the supported
+    // sequence and is idempotent.
+    $brBootStage = 'kernel bootstrap';
+    $kernel = $app->make(Kernel::class);
+    $kernel->bootstrap();
+
+    // Bind the request IMMEDIATELY after bootstrap.
+    //
+    // Laravel binds 'request' inside Kernel::sendRequestThroughRouter(), which
+    // only runs during handle(). Between bootstrap() and handle() the container
+    // has no 'request' - and if anything throws in that window, Laravel's global
+    // exception handler cannot render the error, because rendering needs the
+    // request. The operator then sees a CRITICAL cascade about
+    // 'Class "request" does not exist' that hides the real exception:
+    //
+    //   FatalError: Uncaught ReflectionException: Class "request" does not exist
+    //   Next BindingResolutionException: Target class [request] does not exist.
+    //     at HandleExceptions->renderHttpResponse()
+    //
+    // Binding it here lets that handler work, so the next failure names itself
+    // instead of producing that cascade.
+    $brBootStage = 'bind request';
+    $brRequest = Request::capture();
+    $app->instance('request', $brRequest);
+    $app->instance('Illuminate\Http\Request', $brRequest);
+} catch (\Throwable $e) {
+    if (! headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'bootstrap failed: ' . $e->getMessage(),
+        'exception' => $e::class,
+        'stage' => $brBootStage,
+        'at' => basename($e->getFile()) . ':' . $e->getLine(),
+        'memory_limit' => ini_get('memory_limit'),
+        'user' => function_exists('posix_getpwuid')
+            ? (posix_getpwuid(posix_geteuid())['name'] ?? '?')
+            : '?',
+    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    $brBootDone = true;
+
+    return;
+}
 
 $controller = 'App\\Plugins\\BackupRestore\\Controllers\\BackupRestoreController';
 $base = 'plugin-backuprestore.php';
@@ -152,9 +237,32 @@ $router->setRoutes($collection);
 // parameter is present we rewrite the request onto the equivalent routed URL so
 // the identical middleware stack (session, CSRF, auth) and route table apply.
 // ---------------------------------------------------------------------------
-$request = Request::capture();
+$request = $brRequest ?? Request::capture();
 $resource = (string) ($_GET['r'] ?? '');
 if ($resource !== '') {
+    // Backward compatibility for clients that incorrectly place a query string
+    // inside the `r` parameter, e.g. ?r=backups%3Flimit%3D100.
+    // Split it before validating the resource, then add those parameters to the
+    // Laravel request query bag so controllers can read $request->query('limit').
+    $embeddedQuery = '';
+    $queryPosition = strpos($resource, '?');
+    if ($queryPosition !== false) {
+        $embeddedQuery = substr($resource, $queryPosition + 1);
+        $resource = substr($resource, 0, $queryPosition);
+
+        if ($embeddedQuery !== '') {
+            $embeddedParameters = [];
+            parse_str($embeddedQuery, $embeddedParameters);
+
+            // Keep explicitly supplied URL query parameters authoritative if a
+            // key appears in both places; merge only the embedded parameters.
+            $existingParameters = $request->query->all();
+            $request->query->replace(array_replace($embeddedParameters, $existingParameters));
+        }
+    }
+
+    // Validate only the resource path. Query parameters are separate data and
+    // must not weaken the resource-path allowlist or traversal protection.
     if (preg_match('#[^A-Za-z0-9._/-]#', $resource) || str_contains($resource, '..')) {
         abort(400, 'invalid resource');
     }
@@ -284,6 +392,8 @@ if ($wantsJson) {
         // Never let diagnostics machinery break the request.
     }
 }
+
+$brBootDone = true;
 
 try {
     $response = tap($kernel->handle($request))->send();

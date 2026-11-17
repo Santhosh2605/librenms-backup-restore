@@ -126,7 +126,7 @@ install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 \
     "$BACKUP_ROOT/archives" "$BACKUP_ROOT/staging" "$BACKUP_ROOT/recovery-checkpoints"
 install -d -o root -g "$APP_GROUP" -m 0750 "$CONF_DIR" "$KEY_DIR"
 # The worker owns its own state dir (health.json) and log dir.
-install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 "$STATE_DIR" "$LOG_DIR"
+install -d -o "$APP_USER" -g "$APP_GROUP" -m 0755 "$STATE_DIR" "$LOG_DIR"
 install -d -o root -g root -m 0755 "$HELPER_DIR"
 install -d -o root -g "$APP_GROUP" -m 0755 "$RUN_DIR"
 c_ok "directories created"
@@ -144,7 +144,15 @@ rsync -a --delete "$SRC_DIR/docs/" "$PREFIX/docs/" 2>/dev/null || true
 # root-owned like the rest of the tree and nothing loads it at runtime.
 if [[ -d "$SRC_DIR/tests" ]]; then
     rsync -a --delete --exclude '__pycache__' "$SRC_DIR/tests/" "$PREFIX/tests/" 2>/dev/null || true
-    [[ -f "$SRC_DIR/pytest.ini" ]] && install -m 0644 "$SRC_DIR/pytest.ini" "$PREFIX/pytest.ini"
+    # `install SRC DST` refuses when SRC and DST are the same file, which happens
+    # whenever the source tree IS the prefix. Copying the whole download into
+    # /opt/librenms-backup-restore and running install.sh from there is the
+    # natural thing to do, and it aborted the install at this line.
+    if [[ -f "$SRC_DIR/pytest.ini" ]]; then
+        if [[ "$(readlink -f "$SRC_DIR/pytest.ini")" != "$(readlink -f "$PREFIX/pytest.ini")" ]]; then
+            install -m 0644 "$SRC_DIR/pytest.ini" "$PREFIX/pytest.ini"
+        fi
+    fi
 fi
 chown -R root:root "$PREFIX"
 find "$PREFIX" -type d -exec chmod 0755 {} +
@@ -383,7 +391,49 @@ step "9. LibreNMS plugin files"
 # ---------------------------------------------------------------------------
 PLUGIN_DIR="$LIBRENMS_ROOT/app/Plugins/BackupRestore"
 install -d -o "$APP_USER" -g "$APP_GROUP" -m 0755 "$PLUGIN_DIR"
-rsync -a --delete "$SRC_DIR/plugin/" "$PLUGIN_DIR/"
+
+# Building archives from plugin/ is normal. But if the operator updated the
+# front controller in $PREFIX by hand instead of re-running this installer, the
+# copy in $PREFIX is NEWER than the one in the source tree - and rsync would
+# silently roll the fix back. That is an easy mistake to make (`vi` the file you
+# can see) and an invisible one to diagnose, so prefer whichever is newer.
+src_fc="$SRC_DIR/front-controller/plugin-backuprestore.php"
+pkg_fc="$PREFIX/front-controller/plugin-backuprestore.php"
+if [[ -f "$pkg_fc" && -f "$src_fc" && "$pkg_fc" -nt "$src_fc" ]]; then
+    c_warn "$pkg_fc is newer than the source tree copy"
+    c_warn "  using the newer hand-edited file (back it up; re-apply after a real upgrade)"
+    src_fc="$pkg_fc"
+fi
+
+# NEVER rsync --delete from an incomplete plugin/ tree: `rsync -a --delete empty/
+# dst/` empties dst, and the installer then reports success while the plugin is
+# gone. Verify the source has the classes that must exist before touching dst.
+plugin_source_ok() {
+    local d="$1"
+    [[ -f "$d/Controllers/BackupRestoreController.php" \
+    && -f "$d/Services/ApiKernel.php" \
+    && -f "$d/Models/Backup.php" \
+    && -f "$d/Menu.php" && -f "$d/Page.php" ]]
+}
+
+if [[ -d "$SRC_DIR/plugin" ]] && plugin_source_ok "$SRC_DIR/plugin"; then
+    rsync -a --delete "$SRC_DIR/plugin/" "$PLUGIN_DIR/"
+elif [[ -d "$PREFIX/plugin" ]] && plugin_source_ok "$PREFIX/plugin"; then
+    c_info "using $PREFIX/plugin (already-unpacked tree)"
+    rsync -a --delete "$PREFIX/plugin/" "$PLUGIN_DIR/"
+else
+    die "no complete plugin/ tree in $SRC_DIR or $PREFIX (need Controllers/, Models/, Services/, Menu.php, Page.php).
+       Re-extract the release, or restore from the download:
+         sudo tar -xzf librenms-backup-restore-*.tar.gz -C /tmp
+         sudo /tmp/librenms-backup-restore-*/scripts/install.sh"
+fi
+
+# Prove the classes actually landed before claiming success.
+for required in Controllers/BackupRestoreController.php Services/ApiKernel.php \
+                Models/Backup.php Models/Restore.php Menu.php Page.php Settings.php; do
+    [[ -f "$PLUGIN_DIR/$required" ]] \
+        || die "plugin install incomplete: $PLUGIN_DIR/$required is missing"
+done
 chown -R "$APP_USER":"$APP_GROUP" "$PLUGIN_DIR"
 find "$PLUGIN_DIR" -type d -exec chmod 0755 {} +
 find "$PLUGIN_DIR" -type f -exec chmod 0644 {} +
@@ -391,7 +441,7 @@ c_ok "plugin files installed to $PLUGIN_DIR"
 
 # Front controller: the LibreNMS-sanctioned way to add routes without patching core.
 install -o "$APP_USER" -g "$APP_GROUP" -m 0644 \
-    "$SRC_DIR/front-controller/plugin-backuprestore.php" \
+    "$src_fc" \
     "$LIBRENMS_ROOT/html/plugin-backuprestore.php"
 c_ok "front controller installed: $LIBRENMS_ROOT/html/plugin-backuprestore.php"
 

@@ -316,6 +316,40 @@ else
     warn "CHANGELOG has no top [$PY_VER] section"
 fi
 
+hdr "Web-tier probe"
+# The probe must never print a secret and must not require the framework.
+if [[ -f "$HERE/scripts/br-probe.php" ]]; then
+    ok "scripts/br-probe.php present"
+else
+    bad "scripts/br-probe.php missing"
+fi
+if grep -q "DB_PASSWORD" "$HERE/scripts/br-probe.php" 2>/dev/null \
+   && grep -q "password never printed\|password', \$pass === ''" "$HERE/scripts/br-probe.php"; then
+    ok "probe masks the database password"
+else
+    bad "probe does not demonstrably mask the password"
+fi
+
+hdr "Installer is safe when SRC_DIR is PREFIX"
+# Copying the whole download into /opt/librenms-backup-restore and running
+# install.sh from there is the natural thing to do. `install SRC DST` aborts when
+# they are the same file, which killed the install at step 2.
+if grep -q "readlink -f \"\$SRC_DIR/pytest.ini\"" "$HERE/scripts/install.sh"; then
+    ok "pytest.ini copy guards against SRC == DST"
+else
+    bad "pytest.ini install aborts when the source tree is the prefix"
+fi
+if grep -q 'pkg_fc" -nt' "$HERE/scripts/install.sh"; then
+    ok "newer hand-edited front controller is not overwritten"
+else
+    bad "a hand-edited front controller in \$PREFIX would be silently reverted"
+fi
+if grep -q 'elif \[\[ -d "\$PREFIX/plugin" \]\]' "$HERE/scripts/install.sh"; then
+    ok "plugin/ falls back to \$PREFIX when the source tree lacks it"
+else
+    bad "no fallback if plugin/ is only present under \$PREFIX"
+fi
+
 hdr "PHP scripts report failure honestly"
 # Laravel's console handler renders an error block and then exits 0. Every
 # caller of br-schema.php is a shell script testing $?, so without an explicit
