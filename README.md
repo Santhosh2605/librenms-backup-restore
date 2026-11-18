@@ -34,13 +34,13 @@ sudo apt-get install -y git python3 python3-pymysql python3-cryptography \
 Choose one of these download options:
 
 **Release tarball:** when available, download the release archive named
-`librenms-backup-restore-1.0.2.tar.gz` from the
+`librenms-backup-restore-1.0.3.tar.gz` from the
 [GitHub Releases](https://github.com/Santhosh2605/librenms-backup-restore/releases)
 page and unpack it:
 
 ```bash
-tar -xzf librenms-backup-restore-1.0.2.tar.gz
-cd librenms-backup-restore-1.0.2
+tar -xzf librenms-backup-restore-1.0.3.tar.gz
+cd librenms-backup-restore-1.0.3
 ```
 
 **GitHub ZIP:** choose **Code → Download ZIP** on GitHub. The ZIP is named
