@@ -43,18 +43,18 @@ compression        = zstd
 zstd_level         = 3
 gzip_level         = 6
 
-# age | openssl-sshaes | none
+# aes256-ctr-hmac-sha256 | age | openssl-sshaes | none
 #
-#   age            X25519 + ChaCha20-Poly1305 (recommended; needs the age binary)
+#   aes256-ctr-hmac-sha256 AES-256-CTR + HMAC-SHA256; PBKDF2-HMAC-SHA256 (600k)
+#   age            X25519 + ChaCha20-Poly1305 (legacy archive compatibility)
 #   openssl-sshaes AES-256-CTR + HMAC-SHA256 with PBKDF2-HMAC-SHA256 (600k iters)
-#                  passphrase-based fallback for hosts without age; the alias
-#                  `aesgcm-pbkdf2` selects the same container.
+#                  historical alias for the same AES container.
 #   none           no encryption - only for labs. Recorded in the manifest.
-encryption         = age
+encryption         = aes256-ctr-hmac-sha256
 # age recipients file (public keys). Private identity lives separately.
 age_recipients_file = /etc/librenms-backup/keys/recipients.txt
 age_identity_file   = /etc/librenms-backup/keys/identity.txt
-# openssl fallback: passphrase file, root:librenms 0640, one line
+# AES passphrase file, root:librenms 0640, one line
 openssl_passphrase_file = /etc/librenms-backup/keys/passphrase
 
 # Verification policy: always | scheduled-only | never

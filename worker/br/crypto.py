@@ -299,13 +299,24 @@ class EncryptedReader:
             self._fh.seek(body_start)
             self._remaining = total - body_start - TAG_LEN
             try:
-                salt = base64.b64decode(header["salt"])
-                nonce = base64.b64decode(header["nonce"])
+                salt = base64.b64decode(header["salt"], validate=True)
+                nonce = base64.b64decode(header["nonce"], validate=True)
                 iterations = int(header.get("iterations", PBKDF2_ITERATIONS))
             except (KeyError, TypeError, ValueError, binascii.Error) as exc:
                 raise IntegrityError(
                     f"corrupt container header: missing or invalid field ({exc})"
                 ) from exc
+            if len(salt) != 16 or len(nonce) != 16:
+                raise IntegrityError("corrupt container header: invalid salt or nonce length")
+            if (header.get("cipher") != "AES-256-CTR"
+                    or header.get("mac") != "HMAC-SHA256"
+                    or header.get("kdf") != "PBKDF2-HMAC-SHA256"):
+                raise IntegrityError("corrupt container header: unsupported AES/HMAC parameters")
+            # The iteration count comes from an unauthenticated header. Bound
+            # it before deriving keys to prevent a crafted archive from forcing
+            # excessive CPU work during preflight.
+            if not 100_000 <= iterations <= 2_000_000:
+                raise IntegrityError("corrupt container header: PBKDF2 iterations out of range")
             k_enc, k_mac = _derive_keys(read_passphrase(self.cfg), salt, iterations)
             self._cipher = Cipher(algorithms.AES(k_enc), modes.CTR(nonce)).decryptor()
             self._mac = hmac.new(k_mac, digestmod=hashlib.sha256)

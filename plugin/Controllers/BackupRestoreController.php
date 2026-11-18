@@ -86,6 +86,7 @@ class BackupRestoreController
                 'GET api/schedules', 'GET api/settings', 'GET api/audit',
                 'POST api/backups', 'POST api/backups/{ref}/verify',
                 'POST api/backups/{ref}/delete', 'POST api/restores',
+                'POST api/restores/upload',
                 'POST api/restores/checkpoint', 'POST api/schedules', 'POST api/settings',
             ],
         ]);
@@ -127,7 +128,7 @@ class BackupRestoreController
             'current_job' => $activeJob?->toPublic(),
             'worker' => $this->workerHealthSnapshot(),
             'encryption' => [
-                'scheme' => Settings::get('encryption_scheme', 'unknown'),
+                'scheme' => $this->workerConfigSummary()['encryption'] ?? 'unknown',
                 'key_fingerprint' => Settings::get('key_fingerprint', 'unknown'),
             ],
         ]);
@@ -320,6 +321,67 @@ class BackupRestoreController
             'checkpoints' => Checkpoint::orderByDesc('created_at')->limit(20)->get()->map->toPublic()->all(),
             'active' => Restore::whereIn('state', Restore::ACTIVE)->first()?->toPublic(),
         ]);
+    }
+
+    /** Receive an archive into the worker-readable intake folder for validation. */
+    public function uploadRestoreArchive(Request $request): JsonResponse
+    {
+        Guard::check($request, 'restore');
+
+        if (Restore::whereIn('state', Restore::ACTIVE)->exists()
+            || Job::whereIn('status', ['queued', 'running'])->exists()) {
+            return ApiKernel::error('finish the active job or restore before uploading an archive', 409);
+        }
+
+        $upload = $request->file('archive');
+        if (! $upload || ! $upload->isValid()) {
+            return ApiKernel::error('choose a valid .brarchive file to upload', 422);
+        }
+        $size = (int) $upload->getSize();
+        $maxBytes = 50 * 1024 * 1024 * 1024;
+        if ($size <= 0 || $size > $maxBytes) {
+            return ApiKernel::error('archive must be between 1 byte and 50 GiB', 413);
+        }
+        $stream = @fopen($upload->getRealPath(), 'rb');
+        $magic = $stream ? fread($stream, 6) : false;
+        if ($stream) {
+            fclose($stream);
+        }
+        if ($magic !== 'BRENC1') {
+            return ApiKernel::error('file is not a supported BRENC1 backup archive', 422);
+        }
+
+        $incoming = base_path('storage/app/br-uploads');
+        if (! is_dir($incoming) || ! is_writable($incoming)) {
+            return ApiKernel::error('server upload folder is unavailable; rerun the installer or check its ACL', 503);
+        }
+        $free = @disk_free_space($incoming);
+        if ($free !== false && $size > $free) {
+            return ApiKernel::error('not enough free server space for this archive', 413);
+        }
+
+        $token = (string) Str::uuid();
+        $filename = $token . '.upload';
+        try {
+            $upload->move($incoming, $filename);
+            @chmod($incoming . DIRECTORY_SEPARATOR . $filename, 0640);
+        } catch (\Throwable $e) {
+            return ApiKernel::error('could not save the uploaded archive on the server', 500);
+        }
+
+        $job = $this->enqueue('import', null, ['backup_ref' => $token]);
+        if ($job instanceof JsonResponse) {
+            @unlink($incoming . DIRECTORY_SEPARATOR . $filename);
+
+            return $job;
+        }
+        ApiKernel::audit($request, 'backup.uploaded', [
+            'upload' => $token,
+            'size' => $size,
+            'job' => $job->job_id,
+        ]);
+
+        return ApiKernel::ok(['job' => $job->toPublic()], 202);
     }
 
     public function restorePreflight(Request $request, string $ref): JsonResponse
@@ -603,7 +665,6 @@ class BackupRestoreController
             'retention_keep_daily' => 'required|integer|min:0|max:365',
             'retention_keep_weekly' => 'required|integer|min:0|max:104',
             'retention_keep_monthly' => 'required|integer|min:0|max:120',
-            'encryption_scheme' => 'required|in:age,aesgcm-pbkdf2,none',
         ]);
 
         Settings::set($data);
@@ -651,8 +712,8 @@ class BackupRestoreController
     /**
      * Create a queue row for the worker.
      *
-     * The web tier performs a single INSERT and nothing else: it has no
-     * privileges, no sockets and no filesystem access to the backup tree.
+     * Normal jobs are a single INSERT. Upload jobs also place an archive in
+     * the ACL-protected intake directory, never in the archive store.
      */
     private function enqueue(string $kind, ?string $backupType = null, array $options = [])
     {
@@ -670,7 +731,8 @@ class BackupRestoreController
 
         // NO privilege escalation from the web tier.
         //
-        // The PHP-FPM process only writes a row. The root-owned systemd timer
+        // The PHP-FPM process never starts a worker or writes the archive store.
+        // The root-owned systemd timer
         // `librenms-backup-dispatch.timer` runs `br-worker dispatch` as the
         // unprivileged `librenms` user every 15s; that process claims queued
         // rows and detaches one worker per job. See docs/SECURITY.md

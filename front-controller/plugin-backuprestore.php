@@ -195,6 +195,7 @@ Route::middleware(['web'])->group(function () use ($controller, $ref, $uuid, &$b
     $brRoutes[] = Route::post('br/backups/{ref}/verify', [$controller, 'verifyBackup'])->where('ref', $ref);
     $brRoutes[] = Route::post('br/backups/{ref}/delete', [$controller, 'deleteBackup'])->where('ref', $ref);
     $brRoutes[] = Route::post('br/restores', [$controller, 'restore']);
+    $brRoutes[] = Route::post('br/restores/upload', [$controller, 'uploadRestoreArchive']);
     $brRoutes[] = Route::post('br/restores/checkpoint', [$controller, 'restoreCheckpoint']);
     $brRoutes[] = Route::post('br/schedules', [$controller, 'saveSchedule']);
     $brRoutes[] = Route::post('br/settings', [$controller, 'saveSettings']);

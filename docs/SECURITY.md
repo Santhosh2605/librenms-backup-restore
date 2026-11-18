@@ -12,16 +12,21 @@ PHP-FPM a sudo rule. This one does not.
 PHP-FPM  ──(DB rows only)──>  dispatcher ──(helper socket)──>  br-helper (root)
 ```
 
-### The web tier has no privilege at all
+### The web tier has no privileged filesystem access
 
 `plugin/` and `front-controller/` never call `exec`, never open a privileged
 file, and are **absent from `/etc/sudoers.d/librenms-backup`**. There is
 deliberately no entry for `www-data` or `librenms` that grants anything beyond a
 single root binary.
 
-Consequence: PHP RCE yields the ability to write rows in `br_jobs`. The worker
-refuses any job that fails validation, so the realistic worst case is a
-denial-of-service against a tool the attacker already controls the host for.
+PHP-FPM can write only to `storage/app/br-uploads`, a dedicated intake folder
+with ACL access for the configured PHP user. It cannot read or write the backup
+archive tree. The worker treats every upload as untrusted, validates its
+manifest, and verifies it before registration.
+
+Consequence: PHP RCE can submit malicious or oversized uploads and queue jobs,
+but it cannot modify registered archives or directly invoke the root helper.
+Host upload limits and free disk space still constrain intake capacity.
 
 ### Exactly one escalation path
 
@@ -37,15 +42,17 @@ validates argv itself and never invokes a shell.
 
 * Unix socket `/run/librenms-backup/br-helper.sock`, mode `0660`, group `librenms`.
 * Every message is HMAC-SHA256 signed with `/run/librenms-backup/br-helper.hmac`
-  (root-created, `0640`), preventing a compromised worker from forging an
-  operation it did not intend.
+  (root-created, `0640`). The worker can read this shared key, so the MAC
+  detects modification in transit; it does not distinguish a compromised
+  worker from an intended caller. The helper therefore enforces its own
+  operation and path policy for every request.
 * Closed operation set — anything else is refused before dispatch:
 
 | Operation | Constraint |
 |---|---|
 | `fs.stat` / `fs.list` / `fs.hash` | Read-only, path must be under an allowlisted root |
 | `fs.mkdir` / `fs.unlink` | Backup roots only |
-| `fs.install_tree` / `fs.install_file` | Source must be inside staging; target inside the LibreNMS root |
+| `fs.install_tree` / `fs.install_file` | Source must be readable from approved roots; target must be inside the LibreNMS root, configured integration roots, or approved certificate/key paths; ownership and modes are fixed |
 | `service.start` / `service.stop` | Unit must be in `ALLOWED_UNITS` |
 | `service.validate` | Fixed validator per unit — never a caller-supplied command |
 | `db.restore` | Socket path allowlisted; database/user names match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; file must end `.sql.gz` |
@@ -119,7 +126,7 @@ Additional interlocks:
 | Secret | Location | Never |
 |---|---|---|
 | DB credentials | LibreNMS `.env` / `config.php` | Written to `br.conf`, the archive, or the API payload |
-| age private key | `/etc/librenms-backup/keys/identity.txt`, `0640` | Inside the archive |
+| age private key (legacy archives) | `/etc/librenms-backup/keys/identity.txt`, `0640` | Inside the archive |
 | Container passphrase | `/etc/librenms-backup/keys/passphrase`, `0640` | In `br.conf` or argv |
 | LibreNMS `APP_KEY` | LibreNMS `.env` | In API responses |
 
@@ -139,8 +146,13 @@ operator can see that scrubbing happened.
 ### Transport
 
 The API returns no secrets at all: job ids, statuses and byte counts only.
-Archives are encrypted with `age` (X25519 + ChaCha20-Poly1305) by default, with
-an AES-256-CTR + HMAC-SHA256 / PBKDF2 fallback for hosts without `age`.
+New archives use AES-256-CTR authenticated with HMAC-SHA256. Independent
+encryption and MAC keys are derived from the offline passphrase with
+PBKDF2-HMAC-SHA256 (600,000 iterations and a random salt). Existing `age`
+archives remain readable when their original identity key is retained.
+Automatic restore skips general `/etc` service configuration because root
+services may load executable configuration from those paths. Only certificate
+and key trees can be installed from the system component.
 
 ## What is deliberately *not* protected
 

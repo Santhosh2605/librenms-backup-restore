@@ -52,19 +52,31 @@ DEFAULT_SOCKET = "/run/librenms-backup/br-helper.sock"
 HMAC_FILE = "/run/librenms-backup/br-helper.hmac"
 SOCKET_GROUP = "librenms"
 MAX_REQUEST = 4 * 1024 * 1024
+SAFE_SYSTEM_RESTORE_ROOTS = ("/etc/ssl/certs", "/etc/ssl/private")
 
 #: Paths the helper may read/write. Populated from the config at startup.
 class PathPolicy:
     def __init__(self, *, backup_root: str, checkpoint_dir: str, librenms_root: str,
-                 stage_dir: str):
+                 stage_dir: str, system_paths: t.Sequence[str] = (),
+                 integration_paths: t.Sequence[str] = (), app_user: str = "librenms",
+                 app_group: str = "librenms"):
         self.writable_roots = [os.path.abspath(p) for p in (backup_root, stage_dir, checkpoint_dir)]
-        self.restore_targets = [os.path.abspath(librenms_root), "/etc", "/var/lib",
-                                "/var/log/librenms-backup"]
+        self.app_user = app_user
+        self.app_group = app_group
+        # Only permit targets that the configured backup can legitimately
+        # restore. Never grant the worker blanket access to /etc or /var/lib.
+        safe_system_paths = [os.path.abspath(p) for p in system_paths
+                             if any(os.path.abspath(p) == root or
+                                    os.path.abspath(p).startswith(root + os.sep)
+                                    for root in SAFE_SYSTEM_RESTORE_ROOTS)]
+        self.restore_targets = [os.path.abspath(librenms_root), *safe_system_paths,
+                                *(os.path.abspath(p) for p in integration_paths)]
         # The app tree is a legitimate SOURCE as well as a target: the
         # permission-repair step re-applies ownership over the installed tree,
         # and requiring staging-only sources made that step impossible.
         self.readable_roots = (self.writable_roots + self.restore_targets
-                               + ["/var/backups", "/opt", "/usr/lib/nagios"])
+                               + [os.path.abspath(p) for p in integration_paths]
+                               + ["/var/backups"])
 
     def writable(self, path: str) -> str:
         validate_abs_path(path)
@@ -193,10 +205,19 @@ class Helper:
         """
         source = self.policy.readable(_require(payload, "source"))
         target = self.policy.restorable(_require(payload, "target"))
-        owner = str(payload.get("owner", "librenms"))
-        group = str(payload.get("group", "librenms"))
+        owner = str(payload.get("owner", self.policy.app_user))
+        group = str(payload.get("group", self.policy.app_group))
         mode = int(payload.get("mode", 0o750))
         refuse = [str(x) for x in payload.get("refuse", [])]
+
+        if owner != self.policy.app_user or group != self.policy.app_group:
+            raise ValidationError("restore ownership must use the configured LibreNMS account")
+        if mode not in (0o755, 0o775):
+            raise ValidationError("restore mode must be 0755 or 0775")
+        # Caller-supplied refuse lists must never be able to weaken protection
+        # for host identity and access-control files.
+        refuse.extend(("/etc/machine-id", "machine-id", "shadow", "gshadow",
+                       "sudoers", "sudoers.d/", "ssh/", "ssl/private/"))
 
         uid = _uid(owner)
         gid = _gid(group)
@@ -517,6 +538,10 @@ def serve(socket_path: str = DEFAULT_SOCKET, conf_path: str | None = None) -> in
         checkpoint_dir=cfg.checkpoint_dir,
         librenms_root=cfg.librenms_root,
         stage_dir=cfg.stage_dir,
+        system_paths=cfg.get_list("components", "system_paths"),
+        integration_paths=cfg.get_list("components", "integration_paths"),
+        app_user=cfg.app_user,
+        app_group=cfg.app_group,
     )
     _Handler.helper = Helper(policy, log)
     _Handler.secret = _ensure_secret(socket_path, log)

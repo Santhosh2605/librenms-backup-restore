@@ -26,7 +26,7 @@ On Ubuntu or Debian, run:
 ```bash
 sudo apt-get update
 sudo apt-get install -y git python3 python3-pymysql python3-cryptography \
-                        zstd age mariadb-client rsync
+                        zstd mariadb-client rsync acl
 ```
 
 ### 2. Download the project
@@ -55,19 +55,17 @@ sudo LIBRENMS_ROOT=/srv/librenms bash scripts/install.sh
 
 ### 4. Save the encryption key off the server
 
-With the packages above, the installer uses `age` and creates this private key:
+The installer uses AES-256 encryption authenticated with HMAC-SHA256 and creates:
 
 ```text
-/etc/librenms-backup/keys/identity.txt
+/etc/librenms-backup/keys/passphrase
 ```
 
-Copy the file's contents into a secure password manager or other safe offline
-storage. **You need this key to decrypt your backups.** Never commit it to GitHub
-or leave your only copy on the LibreNMS server. Do not generate a replacement
-key after backups have been created.
-
-If the installer says it is using the passphrase fallback instead, save
-`/etc/librenms-backup/keys/passphrase` in the same way.
+Copy the file into a secure password manager or other safe offline storage.
+**You need this passphrase to decrypt your backups.** Never commit it to GitHub
+or leave your only copy on the LibreNMS server. Do not replace it after backups
+have been created. Existing `age` archives remain readable with their original
+`identity.txt` key; keep that key if you have older archives.
 
 ### 5. Open the plugin and make a backup
 
@@ -77,6 +75,17 @@ If the installer says it is using the passphrase fallback instead, save
 4. Verify that the backup is marked **verified**.
 5. Rehearse a restore on a test or staging server before relying on backups for
    recovery.
+
+To save an archive to your computer, open **Backup History** and choose
+**Download**. To restore an archive that is on your computer, open **Restore**,
+choose the `.brarchive` file under **Add a backup to this server**, and select
+**Upload and verify**. After verification completes, select that backup and run
+the pre-flight checks before confirming the restore. Uploads remain on the
+server; they are never sent to an external storage service.
+
+The installer grants the PHP-FPM account access only to the upload intake
+folder. It assumes the web account is `www-data`; for a custom PHP-FPM user,
+install with `sudo WEB_USER=<php-fpm-user> bash scripts/install.sh`.
 
 If the menu item does not appear, refresh LibreNMS's cached plugin list:
 
@@ -92,8 +101,8 @@ see [RESTORE.md](docs/RESTORE.md).
 
 - **Five components, selectable per run** — database, RRD, application, system,
   integrations. Back up everything, or just the config, or just the database.
-- **Encrypted by default** — `age` (X25519 + ChaCha20-Poly1305), with an
-  AES-256-CTR + HMAC-SHA256 / PBKDF2 fallback for hosts without `age`.
+- **Encrypted by default** — AES-256-CTR authenticated with HMAC-SHA256;
+  keys are derived from the offline passphrase using PBKDF2-HMAC-SHA256.
 - **Verified, not assumed** — `shallow` opens the container, `standard` checks
   every member's SHA-256, `deep` additionally gunzips the SQL dump and checks its
   schema statement and terminator.
@@ -124,7 +133,7 @@ flowchart LR
     subgraph K["Worker · librenms"]
         DISP["Dispatcher<br/>systemd timer"]
         WK["Backup · verify<br/>restore"]
-        PIPE["tar → zstd → age<br/>BRENC1"]
+        PIPE["tar → zstd → AES-256 + HMAC-SHA256<br/>BRENC1"]
     end
 
     subgraph H["Root helper · only escalation"]
@@ -164,7 +173,7 @@ the helper touches is checked against an allowlist first.
 | **Eloquent models** | `www-data` | The 7 `br_*` tables | `plugin/Models/` |
 | **Dispatcher** | `librenms` | Timer-driven; claims queued jobs and spawns one worker each | `worker/br/worker.py` |
 | **Worker** | `librenms` | Backup, verify, restore, retention | `worker/br/` |
-| **Archive pipeline** | `librenms` | `tar → zstd → age → BRENC1`, streaming, constant memory | `worker/br/writer.py`, `crypto.py` |
+| **Archive pipeline** | `librenms` | `tar → zstd → AES-256 + HMAC-SHA256 → BRENC1`, streaming, constant memory | `worker/br/writer.py`, `crypto.py` |
 | **Root helper** | `root` | 20 operations over a unix socket, HMAC-signed | `worker/br/helper.py` |
 | **Path allowlist** | `root` | Rejects traversal, `/` as a target, and anything outside the configured roots | `helper.py` (`PathPolicy`) |
 
@@ -189,7 +198,7 @@ For a terminal-only view of the same diagram:
  Browser ──HTTPS──▶ Front controller ──▶ 22 routes ──▶ Models ──▶ MariaDB
                                                                    ▲
                                                                    │ claim
- Dispatcher (timer) ──▶ Worker ──▶ tar → zstd → age → BRENC1 ──▶ Archives
+ Dispatcher (timer) ──▶ Worker ──▶ tar → zstd → AES-256 + HMAC-SHA256 ──▶ Archives
                           │
                           └──sudo──▶ Unix socket ──▶ 20 ops ──▶ Path allowlist
                                                                    │
@@ -257,7 +266,7 @@ default); `PYTHONPATH=/opt/librenms-backup-restore/worker`.
 
 ## Requirements
 
-Python 3.11+ · PHP 8.2+ · MariaDB 10.6+ · systemd 245+ · `zstd` · `age`.
+Python 3.11+ · PHP 8.2+ · MariaDB 10.6+ · systemd 245+ · `zstd`.
 Validated on Debian 13 / PHP 8.4 / MariaDB 11.8 against LibreNMS `dd4cebd7`;
 target platform is Ubuntu 26.04 / PHP 8.5.
 
