@@ -4,6 +4,7 @@ Entry point::
 
     br-worker backup   --job <uuid> [--type full|database|rrd|configuration|system]
     br-worker verify   --job <uuid> --backup <ref> [--level standard]
+    br-worker import   --job <uuid>   (queued browser archive upload)
     br-worker restore  --job <uuid> --restore <uuid> --backup <ref>
     br-worker retention --job <uuid>
     br-worker scheduler-tick          (systemd timer)
@@ -312,6 +313,65 @@ class Worker:
                      error=None if ok else "checksum mismatch")
         return 0 if ok else 3
 
+    def import_uploaded_archive(self, job_id: str, upload_token: str) -> int:
+        """Validate, register, and verify an archive uploaded through the GUI."""
+        import hashlib
+        import tempfile
+        from .common import JOB_ID_RE
+
+        if not JOB_ID_RE.fullmatch(upload_token):
+            self._finish(job_id, "failed", error="invalid upload token")
+            return 2
+        incoming_dir = os.path.join(self.cfg.librenms_root, "storage", "app", "br-uploads")
+        incoming = os.path.join(incoming_dir, f"{upload_token}.upload")
+        temp_path = None
+        try:
+            self._progress(job_id, 5, "IMPORTING", "validating uploaded archive")
+            real_dir = os.path.realpath(incoming_dir)
+            real_input = os.path.realpath(incoming)
+            if (real_input != os.path.join(real_dir, f"{upload_token}.upload")
+                    or not os.path.isfile(real_input)):
+                raise ValidationError("uploaded archive is missing or invalid")
+            manifest = manifest_mod.validate(_manifest_from_archive(real_input, self.cfg, self.log))
+            backup_ref = manifest["backup_id"]
+            destination = os.path.join(self.cfg.archive_dir, f"{backup_ref}.brarchive")
+            if self.store.backup(backup_ref) or os.path.exists(destination):
+                raise ValidationError(f"backup {backup_ref} already exists on this server")
+            upload_size = os.path.getsize(real_input)
+            reserve = self.cfg.get_int("general", "headroom_mib", 512) * 1024 * 1024
+            if shutil.disk_usage(self.cfg.archive_dir).free < upload_size + reserve:
+                raise ValidationError("not enough archive-store space to import this upload safely")
+
+            digest = hashlib.sha256()
+            fd, temp_path = tempfile.mkstemp(prefix=".upload-", suffix=".tmp",
+                                             dir=self.cfg.archive_dir)
+            with os.fdopen(fd, "wb") as out, open(real_input, "rb") as src:
+                for block in iter(lambda: src.read(1024 * 1024), b""):
+                    digest.update(block)
+                    out.write(block)
+                out.flush()
+                os.fsync(out.fileno())
+            os.chmod(temp_path, 0o640)
+            os.replace(temp_path, destination)
+            temp_path = None
+            _write_sidecar(destination, digest.hexdigest())
+            self.adopt_orphans()
+            if not self.store.backup(backup_ref):
+                raise BRException("uploaded archive could not be registered")
+            self.log.info("uploaded archive registered", backup=backup_ref)
+            return self.verify_backup(job_id, backup_ref, "standard")
+        except Exception as exc:
+            self.log.error("uploaded archive import failed", error=str(exc))
+            self._finish(job_id, "failed", error=str(exc))
+            return 1
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+            try:
+                os.unlink(incoming)
+            except FileNotFoundError:
+                pass
+
     # ------------------------------------------------------------------ #
     # RESTORE
     # ------------------------------------------------------------------ #
@@ -601,6 +661,8 @@ class Worker:
         if kind == "verify":
             return self.verify_backup(job_id, job.get("backup_id") or "",
                                       str(self.store.setting_get(f"verify_level_{job_id}") or "standard"))
+        if kind == "import":
+            return self.import_uploaded_archive(job_id, job.get("backup_id") or "")
         if kind == "restore":
             restore_id = job.get("restore_id") or ""
             rollback_of = ""

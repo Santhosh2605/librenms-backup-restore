@@ -130,11 +130,12 @@ class Config:
         "none": "none",
         "aesgcm-pbkdf2": "aesgcm-pbkdf2",
         "openssl-sshaes": "aesgcm-pbkdf2",
+        "aes256-ctr-hmac-sha256": "aesgcm-pbkdf2",
     }
 
     @property
     def encryption(self) -> str:
-        value = str(self.get("archive", "encryption", "age")).strip().lower()
+        value = str(self.get("archive", "encryption", "aes256-ctr-hmac-sha256")).strip().lower()
         canonical = self._ENCRYPTION_ALIASES.get(value)
         if canonical is None:
             raise ValidationError(

@@ -8,14 +8,20 @@ hypothesis, not a backup.
 
 1. **Confirm which backup.** The dashboard lists reference, size, age and
    verification state. Pick one marked `verified`.
-2. **Confirm you have the key.** For `age`, you need `identity.txt` — if it is
-   only on this host and this host is the one you are restoring, you have no
-   recovery path. Take it from your offsite copy first.
+2. **Confirm you have the decryption key.** New backups need the offline AES
+   passphrase. Older `age` backups need `identity.txt`. If the only copy is on
+   this host and this host is the one you are restoring, take the offline copy
+   first.
 3. **Confirm the rollback path.** A restore takes a fresh recovery checkpoint
    automatically, but that checkpoint lands on this host's disk. If the disk is
    the problem, the checkpoint is not a rollback.
 4. **Expect downtime.** The application is put into maintenance mode and Apache /
    php-fpm are stopped for the duration.
+
+To restore a file that is not already listed, open the plugin's **Restore** tab,
+upload the `.brarchive` file, and wait for server-side validation and verification
+to finish. The verified archive will then appear in the restore selector. The
+upload is kept on the server; no cloud service is involved.
 
 ## Rehearse first
 
@@ -50,8 +56,8 @@ Then run the restore from the GUI. What "success" looks like:
 | Checkpoint | `cp-<timestamp>-<restore-id>` created and verified |
 | Maintenance | LibreNMS in maintenance mode; `apache2` and `php-fpm` stopped |
 | Database | Dump imported into a scratch schema, then promoted; table count reported |
-| Files | `application`, `rrd`, `system`, `integrations` trees installed |
-| Config | `config.php` / `.env` restored (machine-specific network config skipped) |
+| Files | `application`, `rrd`, and configured `integrations` trees installed |
+| Config | `config.php` / `.env` restored; certificate/key trees may be restored; general `/etc` service configuration is skipped for safety |
 | Permissions | Ownership normalised to `librenms:librenms` |
 | Services | Services validated and restarted |
 | Result | Job `completed`, state `DONE` |

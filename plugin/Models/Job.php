@@ -5,7 +5,7 @@ namespace App\Plugins\BackupRestore\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * A unit of work executed by the worker (backup, verify, restore, retention).
+ * A unit of work executed by the worker (backup, upload import, verify, restore, retention).
  *
  * The GUI never runs work directly: it writes a row here and asks systemd to
  * start `librenms-backup-worker@<job_id>.service`. The worker owns the row's
@@ -47,7 +47,7 @@ class Job extends Model
     /** Terminal states. */
     public const FINISHED = ['completed', 'failed', 'cancelled'];
 
-    public const KINDS = ['backup', 'verify', 'restore', 'retention', 'checkpoint'];
+    public const KINDS = ['backup', 'import', 'verify', 'restore', 'retention', 'checkpoint'];
 
     public function isFinished(): bool
     {

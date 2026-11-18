@@ -72,13 +72,17 @@
             }
         };
         if (options.body) {
-            var form = new URLSearchParams();
-            Object.keys(options.body).forEach(function (k) {
-                form.append(k, options.body[k]);
-            });
-            form.append("_token", B.csrf);
-            init.body = form;
-            init.headers["Content-Type"] = "application/x-www-form-urlencoded";
+            if (options.body instanceof FormData) {
+                init.body = options.body;
+            } else {
+                var form = new URLSearchParams();
+                Object.keys(options.body).forEach(function (k) {
+                    form.append(k, options.body[k]);
+                });
+                form.append("_token", B.csrf);
+                init.body = form;
+                init.headers["Content-Type"] = "application/x-www-form-urlencoded";
+            }
             if (init.method === "GET") init.method = "POST";
         }
         return fetch(url, init).then(function (res) {
@@ -426,6 +430,7 @@
                 state.jobId = null;
                 notice(d.job.status === "completed" ? "ok" : "error",
                     "Job " + d.job.status + (d.job.error ? ": " + d.job.error : ""));
+                if (state.tab === "restore") setTimeout(function () { go("restore"); }, 1500);
                 return;
             }
             state.timer = setTimeout(pollJob, 2500);
@@ -456,30 +461,22 @@
             var tbody = el("tbody");
             d.items.forEach(function (b) {
                 var actions = el("td", { class: "br-actions" }, [
-                    el("button", { class: "btn btn-xs btn-default", onclick: function () { showDetail(b.id); } }, ["Details"]),
+                    el("button", { class: "btn btn-xs btn-default", onclick: function () { showDetail(b.backup_ref); } }, ["Details"]),
                     el("button", {
                         class: "btn btn-xs btn-default",
-                        onclick: function () { verifyBackup(b.id); },
+                        onclick: function () { verifyBackup(b.backup_ref); },
                         disabled: b.status !== "completed" ? "disabled" : null
                     }, ["Verify"]),
                     el("a", {
                         class: "btn btn-xs btn-default",
-                        href: B.endpoint + "?r=" + encodeURIComponent("backups/" + b.id + "/download") +
-                              "&_token=" + encodeURIComponent(B.csrf),
-                        onclick: function (ev) {
-                            // Download is a POST-guarded stream; use a synthetic form.
-                            ev.preventDefault();
-                            window.location = B.endpoint + "?r=" +
-                                encodeURIComponent("backups/" + b.id + "/download") +
-                                "&_token=" + encodeURIComponent(B.csrf);
-                        }
+                        href: B.endpoint + "?r=" + encodeURIComponent("backups/" + b.backup_ref + "/download")
                     }, ["Download"]),
                     el("button", {
                         class: "btn btn-xs btn-warning",
                         onclick: function () { go("restore"); },
                         disabled: b.status !== "completed" || b.verification !== "verified" ? "disabled" : null
                     }, ["Restore"]),
-                    el("button", { class: "btn btn-xs btn-danger", onclick: function () { deleteBackup(b.id); } }, ["Delete"])
+                    el("button", { class: "btn btn-xs btn-danger", onclick: function () { deleteBackup(b.backup_ref); } }, ["Delete"])
                 ]);
                 tbody.appendChild(el("tr", {}, [
                     el("td", { html: "<code>" + esc(b.backup_ref) + "</code>" }),
@@ -564,6 +561,31 @@
                 el("span", { text: "A verified recovery checkpoint of the current system is created before anything is modified. The checkpoint is never deleted automatically." })
             ]));
 
+            var uploadForm = el("form", { class: "br-form", onsubmit: function (ev) {
+                ev.preventDefault();
+                var file = uploadInput.files && uploadInput.files[0];
+                if (!file) { notice("error", "Choose a .brarchive file first"); return; }
+                var data = new FormData();
+                data.append("archive", file);
+                api("restores/upload", { method: "POST", body: data })
+                    .then(function (d) {
+                        notice("ok", "Upload received. The server is validating and verifying it now.");
+                        watchJob(d.job.id);
+                    })
+                    .catch(function (e) { notice("error", e.message); });
+            } });
+            var uploadInput = el("input", { class: "form-control", type: "file", name: "archive",
+                accept: ".brarchive,application/octet-stream", required: "required" });
+            uploadForm.appendChild(el("div", { class: "br-field" }, [
+                el("label", { text: "Upload a backup archive from your computer" }),
+                uploadInput,
+                el("p", { class: "br-sub", text: "The encrypted .brarchive is stored on this server, validated and verified before it can be selected for restore." }),
+                el("button", { class: "btn btn-default", type: "submit" }, ["Upload and verify"])
+            ]));
+            panel.appendChild(el("div", { class: "br-section" }, [
+                el("h4", { text: "Add a backup to this server" }), uploadForm
+            ]));
+
             if (restores.active) {
                 panel.appendChild(el("div", { class: "br-section" }, [
                     el("h4", { text: "Restore in progress \u2014 " + restores.active.state }),
@@ -577,7 +599,7 @@
                 });
                 var select = el("select", { class: "form-control", id: "br-restore-target" });
                 candidates.forEach(function (b) {
-                    select.appendChild(el("option", { value: b.id }, [b.backup_ref + " \u2014 " + b.created_at + " \u2014 " + b.size_human]));
+                    select.appendChild(el("option", { value: b.backup_ref }, [b.backup_ref + " \u2014 " + b.created_at + " \u2014 " + b.size_human]));
                 });
                 panel.appendChild(el("div", { class: "br-section" }, [
                     el("h4", { text: "Start a restoration" }),
@@ -805,16 +827,7 @@
             form.appendChild(el("div", { class: "br-field" }, [el("label", { text: "Keep daily" }), el("input", { class: "form-control", type: "number", name: "retention_keep_daily", value: 7, min: 0 })]));
             form.appendChild(el("div", { class: "br-field" }, [el("label", { text: "Keep weekly" }), el("input", { class: "form-control", type: "number", name: "retention_keep_weekly", value: 4, min: 0 })]));
             form.appendChild(el("div", { class: "br-field" }, [el("label", { text: "Keep monthly" }), el("input", { class: "form-control", type: "number", name: "retention_keep_monthly", value: 6, min: 0 })]));
-            var enc = el("select", { class: "form-control", name: "encryption_scheme" });
-            ["age", "aesgcm-pbkdf2", "none"].forEach(function (s) {
-                var o = el("option", { value: s }, [s]);
-                if (cfg.encryption === s) o.selected = true;
-                enc.appendChild(o);
-            });
-            form.appendChild(el("div", { class: "br-field" }, [
-                el("label", { text: "Encryption scheme (must match br.conf)" }), enc,
-                el("p", { class: "br-sub", text: "Changing this only updates the GUI record; the effective scheme is read from br.conf by the worker." })
-            ]));
+            form.appendChild(el("p", { class: "br-sub", text: "Archive encryption is configured by the administrator in /etc/librenms-backup/br.conf. New installations use AES-256-CTR with HMAC-SHA256." }));
             form.appendChild(el("button", { class: "btn btn-primary", type: "submit" }, ["Save settings"]));
             panel.appendChild(form);
         }).catch(function (e) {
@@ -826,7 +839,7 @@
         var fd = new FormData(form);
         var body = {};
         ["enabled", "require_typed_confirmation", "notify_on_failure", "retention_keep_daily",
-            "retention_keep_weekly", "retention_keep_monthly", "encryption_scheme"].forEach(function (k) {
+            "retention_keep_weekly", "retention_keep_monthly"].forEach(function (k) {
             body[k] = fd.get(k);
         });
         api("settings", { method: "POST", body: body })

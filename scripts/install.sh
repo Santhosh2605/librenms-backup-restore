@@ -15,6 +15,7 @@ PREFIX="${PREFIX:-/opt/librenms-backup-restore}"
 LIBRENMS_ROOT="${LIBRENMS_ROOT:-/opt/librenms}"
 APP_USER="${APP_USER:-librenms}"
 APP_GROUP="${APP_GROUP:-librenms}"
+WEB_USER="${WEB_USER:-www-data}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/librenms}"
 CONF_DIR="/etc/librenms-backup"
 KEY_DIR="$CONF_DIR/keys"
@@ -77,6 +78,10 @@ BR_VERSION="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$SRC_DIR/worker/br/common.py"
 [[ -d "$LIBRENMS_ROOT" ]] || die "LibreNMS root not found: $LIBRENMS_ROOT"
 [[ -f "$LIBRENMS_ROOT/artisan" ]] || die "$LIBRENMS_ROOT does not look like a LibreNMS install"
 id "$APP_USER" >/dev/null 2>&1 || die "system user '$APP_USER' does not exist"
+command -v setfacl >/dev/null 2>&1 || die "install the 'acl' package (required for secure browser archive uploads)"
+if [[ "$WEB_USER" != "$APP_USER" ]]; then
+    id "$WEB_USER" >/dev/null 2>&1 || die "web user '$WEB_USER' not found; rerun with WEB_USER=<php-fpm-user>"
+fi
 [[ -d "$LIBRENMS_ROOT/app/Plugins" ]] || die "$LIBRENMS_ROOT/app/Plugins missing"
 
 PHP_BIN="$(command -v php || true)"
@@ -99,7 +104,7 @@ for tool in mariadb-dump tar zstd gzip sha256sum systemctl; do
     command -v "$tool" >/dev/null 2>&1 || c_warn "optional tool not found: $tool"
 done
 
-command -v age >/dev/null 2>&1 || c_warn "age not installed - installer will use the aesgcm-pbkdf2 fallback"
+command -v age >/dev/null 2>&1 || c_info "age is absent; AES is the default (age is only needed for legacy archives)"
 command -v rrdtool >/dev/null 2>&1 && c_ok "rrdtool present" || c_warn "rrdtool not installed (not required by the plugin)"
 
 if [[ $ASSUME_YES -eq 0 ]]; then
@@ -124,6 +129,16 @@ install -d -o root -g root -m 0755 "$PREFIX"
 install -d -o root -g "$APP_GROUP" -m 0750 "$BACKUP_ROOT"
 install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 \
     "$BACKUP_ROOT/archives" "$BACKUP_ROOT/staging" "$BACKUP_ROOT/recovery-checkpoints"
+install -d -o "$APP_USER" -g "$APP_GROUP" -m 0750 \
+    "$LIBRENMS_ROOT/storage/app/br-uploads"
+if [[ "$WEB_USER" != "$APP_USER" ]]; then
+    # PHP-FPM can write only to this intake folder; new upload files inherit
+    # group read/write for the worker while remaining private from other users.
+    setfacl -m "u:$WEB_USER:--x" "$LIBRENMS_ROOT/storage" "$LIBRENMS_ROOT/storage/app"
+    setfacl -m "u:$WEB_USER:rwx,g:$APP_GROUP:rwx,m:rwx" \
+        -d -m "u:$WEB_USER:rwx,g:$APP_GROUP:rw-,m:rw-" \
+        "$LIBRENMS_ROOT/storage/app/br-uploads"
+fi
 install -d -o root -g "$APP_GROUP" -m 0750 "$CONF_DIR" "$KEY_DIR"
 # The worker owns its own state dir (health.json) and log dir.
 install -d -o "$APP_USER" -g "$APP_GROUP" -m 0755 "$STATE_DIR" "$LOG_DIR"
@@ -197,35 +212,24 @@ chown root:"$APP_GROUP" "$CONF_DIR/br.conf"
 chmod 0640 "$CONF_DIR/br.conf"
 
 # ---------------------------------------------------------------------------
-step "5. Encryption key material (stored separately from archives)"
+step "5. Encryption key material (AES-256 + HMAC-SHA256)"
 # ---------------------------------------------------------------------------
-if command -v age-keygen >/dev/null 2>&1; then
-    if [[ ! -f "$KEY_DIR/identity.txt" ]]; then
-        ( umask 077; age-keygen -o "$KEY_DIR/identity.txt" 2>"$KEY_DIR/age-keygen.log" )
-        chown root:"$APP_GROUP" "$KEY_DIR/identity.txt" "$KEY_DIR/age-keygen.log"
-        chmod 0640 "$KEY_DIR/identity.txt" "$KEY_DIR/age-keygen.log"
-        sed -n 's/^# public key: //p' "$KEY_DIR/identity.txt" > "$KEY_DIR/recipients.txt"
-        chown root:"$APP_GROUP" "$KEY_DIR/recipients.txt"
-        chmod 0640 "$KEY_DIR/recipients.txt"
-        c_ok "generated age keypair"
-        c_warn "OFFLINE COPY REQUIRED: store $KEY_DIR/identity.txt somewhere safe NOW."
-        c_warn "Without it, encrypted backups CANNOT be restored. The helper never exports it."
-    else
-        c_info "age identity already present"
-    fi
-    grep -q '^encryption .*age' "$CONF_DIR/br.conf" || \
-        sed -i 's/^encryption .*/encryption         = age/' "$CONF_DIR/br.conf"
+# New backups use the passphrase-based AES container. Keep any existing age
+# identity/recipients in place so older archives remain restorable.
+sed -i 's/^encryption .*/encryption         = aes256-ctr-hmac-sha256/' "$CONF_DIR/br.conf"
+if [[ ! -f "$KEY_DIR/passphrase" ]]; then
+    ( umask 077; head -c 48 /dev/urandom | base64 | tr -d '\n' > "$KEY_DIR/passphrase" )
+    echo >> "$KEY_DIR/passphrase"
+    chown root:"$APP_GROUP" "$KEY_DIR/passphrase"
+    chmod 0640 "$KEY_DIR/passphrase"
+    c_ok "generated 64-char AES passphrase"
+    c_warn "OFFLINE COPY REQUIRED: store $KEY_DIR/passphrase somewhere safe NOW."
 else
-    c_warn "age not installed - configuring aesgcm-pbkdf2 fallback"
-    sed -i 's/^encryption .*/encryption         = aesgcm-pbkdf2/' "$CONF_DIR/br.conf"
-    if [[ ! -f "$KEY_DIR/passphrase" ]]; then
-        ( umask 077; head -c 48 /dev/urandom | base64 | tr -d '\n' > "$KEY_DIR/passphrase" )
-        echo >> "$KEY_DIR/passphrase"
-        chown root:"$APP_GROUP" "$KEY_DIR/passphrase"
-        chmod 0640 "$KEY_DIR/passphrase"
-        c_ok "generated 64-char passphrase"
-        c_warn "OFFLINE COPY REQUIRED: store $KEY_DIR/passphrase somewhere safe NOW."
-    fi
+    chown root:"$APP_GROUP" "$KEY_DIR/passphrase"
+    chmod 0640 "$KEY_DIR/passphrase"
+fi
+if [[ -f "$KEY_DIR/identity.txt" ]]; then
+    c_info "existing age identity retained for older archives"
 fi
 chmod 0750 "$KEY_DIR"
 
@@ -509,17 +513,15 @@ $(printf '\033[1mInstallation complete\033[0m')
              (LibreNMS has no Administration-menu hook for plugins; the
               page itself is titled "Administration > Backup & Restore")
   Config   : $CONF_DIR/br.conf           (root:$APP_GROUP 0640)
-  Keys     : $KEY_DIR/identity.txt        (BACK THIS UP OFFLINE)
+  Keys     : $KEY_DIR/passphrase          (BACK THIS UP OFFLINE)
   Backups  : $BACKUP_ROOT/{archives,recovery-checkpoints}
   Logs     : $LOG_DIR/
   Code     : $PREFIX
 
 Next steps:
-  1. Copy $KEY_DIR/identity.txt to offline storage. It is the ONLY file that
-     can decrypt your archives - lose this host AND that file and the backups
-     cannot be opened by anyone. recipients.txt is the matching public key
-     (not secret). passphrase is used only when age is absent
-     (encryption = aesgcm-pbkdf2 in br.conf).
+  1. Copy $KEY_DIR/passphrase to offline storage. It is required to decrypt
+     new AES-encrypted archives. Keep identity.txt too if older age archives
+     exist; it is required to decrypt those archives.
   2. Run a first backup:  GUI > Backup & Restore > Run Full Backup Now
   3. Verify it, then rehearse a restore on a NON-production host (docs/RESTORE.md).
 EOF

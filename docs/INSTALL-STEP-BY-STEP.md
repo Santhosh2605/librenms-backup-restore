@@ -43,7 +43,7 @@ one command:
 ```bash
 sudo apt-get update
 sudo apt-get install -y python3 python3-pymysql python3-cryptography \
-                        zstd age mariadb-client
+                        zstd mariadb-client acl
 ```
 
 **What each one does:**
@@ -52,9 +52,8 @@ sudo apt-get install -y python3 python3-pymysql python3-cryptography \
 |---|---|
 | `python3` | Runs the background worker that does the actual backup |
 | `python3-pymysql` | Lets the worker talk to the database |
-| `python3-cryptography` | The encryption fallback, if `age` is missing |
+| `python3-cryptography` | AES-256 encryption and HMAC-SHA256 |
 | `zstd` | Compresses the archive |
-| `age` | Encrypts the archive (modern, small, easy to use) |
 | `mariadb-client` | Dumps and restores the database |
 
 Check they all arrived:

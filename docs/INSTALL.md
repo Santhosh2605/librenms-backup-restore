@@ -31,12 +31,12 @@ visudo -c -f /etc/sudoers.d/librenms-backup
 | PHP | 8.2 (8.4/8.5 tested) | Runs the plugin |
 | MariaDB | 10.6 (11.8 tested) | Same instance LibreNMS uses |
 | `zstd` | any | Compression |
-| `age` | 1.1+ | Default encryption; fallback exists if unavailable |
 | systemd | 245+ | Timers and instance units |
-| `python3-cryptography` | any | Only for the `openssl-sshaes`/`aesgcm-pbkdf2` scheme |
+| `python3-cryptography` | any | AES-256 encryption and HMAC-SHA256 |
+| `acl` | any | Restricts PHP-FPM write access to the archive upload intake folder |
 
 ```bash
-sudo apt-get install -y python3 zstd age python3-cryptography \
+sudo apt-get install -y acl python3 zstd python3-cryptography \
                         mariadb-client rsync
 ```
 
@@ -71,6 +71,14 @@ It is idempotent. It performs these steps:
    controller to `<librenms>/html/plugin-backuprestore.php`.
 7. Creates the database schema (`scripts/br-schema.php install`).
 8. Creates `/run/librenms-backup` with the right ownership for the helper socket.
+9. Creates a private archive upload folder readable by the worker and writable
+   by the PHP-FPM user (`www-data` by default). For a different PHP-FPM user,
+   run `sudo WEB_USER=<php-fpm-user> bash scripts/install.sh`.
+
+Set PHP `upload_max_filesize` and `post_max_size` above the largest archive you
+plan to upload (the plugin limit is 50 GiB). If nginx fronts PHP-FPM, also set
+`client_max_body_size` to that size. Restart PHP-FPM and the web server after
+changing their limits.
 
 ### Ownership decisions the installer makes
 
@@ -95,7 +103,7 @@ Edit `/etc/librenms-backup/br.conf`. The values you are most likely to change:
 librenms_root = /opt/librenms
 
 [archive]
-encryption = age          # age | openssl-sshaes | none
+encryption = aes256-ctr-hmac-sha256
 compression = zstd        # zstd | gzip
 
 [components]
@@ -106,33 +114,19 @@ The file is read by the worker and the helper only. **Never put secrets in it.**
 
 ## 5. Keys
 
-### age (recommended)
+### AES-256 and HMAC-SHA256 (default)
 
 ```bash
-sudo age-keygen -o /etc/librenms-backup/keys/identity.txt
-sudo chown root:librenms /etc/librenms-backup/keys/identity.txt
-sudo chmod 0640 /etc/librenms-backup/keys/identity.txt
-
-# record the public key printed on stderr
-sudo tee /etc/librenms-backup/keys/recipients.txt >/dev/null <<'EOF'
-age1...
-EOF
-sudo chown root:librenms /etc/librenms-backup/keys/recipients.txt
-sudo chmod 0640 /etc/librenms-backup/keys/recipients.txt
+sudo cat /etc/librenms-backup/keys/passphrase
 ```
 
-> **Store `identity.txt` off this host.** An encrypted backup whose only private
-> key lives on the machine being restored has no recovery value.
+Save the generated passphrase in secure offline storage. It is required to
+decrypt these backups. Keep any existing `age` identity file as well if you
+need to restore archives created by older versions.
 
-### Passphrase fallback (no `age` available)
-
-```bash
-sudo bash -c 'openssl rand -base64 32 > /etc/librenms-backup/keys/passphrase'
-sudo chown root:librenms /etc/librenms-backup/keys/passphrase
-sudo chmod 0640 /etc/librenms-backup/keys/passphrase
-```
-
-Then set `encryption = openssl-sshaes` in `br.conf`.
+`age` remains supported for reading older archives. To create an `age` archive
+with a legacy installation, set `encryption = age` and keep the matching
+recipient and identity files. New installs should keep the AES setting above.
 
 ## 6. Enable the plugin
 

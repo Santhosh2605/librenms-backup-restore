@@ -438,22 +438,17 @@ class RestoreEngine:
             self._install(os.path.join(self.staging, "rrd"), self.cfg.librenms_root,
                           note="rrd data")
         if components.get("integrations"):
-            # Integration payloads are absolute system paths (e.g. /opt/...),
-            # so install each captured root separately. "/" is not a valid
-            # restore target - the helper's path validator rejects it, which
-            # previously aborted the whole restore at this step.
+            # Integration payloads preserve their configured absolute paths.
+            # Install only those exact roots, never broad parents such as /opt
+            # or /usr.
             integ_root = os.path.join(self.staging, "integrations")
             self._extract_tree("integrations", integ_root)
-            for entry in sorted(os.listdir(integ_root)):
-                src = os.path.join(integ_root, entry)
+            for configured_path in self.cfg.get_list("components", "integration_paths"):
+                src = os.path.join(integ_root, configured_path.lstrip("/"))
                 if not os.path.isdir(src):
                     continue
-                if entry not in ("opt", "usr", "etc", "var"):
-                    self._note(f"integration root {entry!r} has no permitted target - skipped",
-                               level="warning")
-                    continue
-                self._install(src, os.path.join("/", entry),
-                              note=f"integration files ({entry})")
+                self._install(src, configured_path,
+                              note=f"integration files ({configured_path})")
 
     def _restore_configuration(self) -> None:
         components = self.manifest.get("components") or {}
@@ -468,23 +463,23 @@ class RestoreEngine:
         reference_only = set(portability.get("reference_only") or [])
 
         installed = 0
-        for rel_root in sorted(os.listdir(os.path.join(self.staging, "system"))):
-            if rel_root != "etc":
+        safe_roots = ("/etc/ssl/certs", "/etc/ssl/private")
+        for configured_path in self.cfg.get_list("components", "system_paths"):
+            if not any(configured_path == root or configured_path.startswith(root + "/")
+                       for root in safe_roots):
                 continue
-            etc_root = os.path.join(self.staging, "system", "etc")
-            for service in sorted(os.listdir(etc_root)):
-                src = os.path.join(etc_root, service)
-                rel = f"etc/{service}"
-                if rel in reference_only:
-                    self._note(f"skipped machine-specific path {rel}", level="warning")
-                    continue
-                if not os.path.isdir(src):
-                    continue
-                self._install(src, f"/etc/{service}",
-                              note=f"/etc/{service}",
-                              refuse=MACHINE_IDENTITY_REFUSE)
-                installed += 1
-        self._note(f"restored {installed} configuration trees under /etc")
+            rel = configured_path.lstrip("/")
+            if rel in reference_only:
+                self._note(f"skipped machine-specific path {rel}", level="warning")
+                continue
+            src = os.path.join(self.staging, "system", rel)
+            if not os.path.isdir(src):
+                continue
+            self._install(src, configured_path, note=configured_path,
+                          refuse=MACHINE_IDENTITY_REFUSE)
+            installed += 1
+        self._note(f"restored {installed} safe certificate/key configuration trees; "
+                   "other system configuration paths were skipped for safety")
 
     def _fix_permissions(self) -> None:
         self._progress(84, "repairing ownership and permissions")
