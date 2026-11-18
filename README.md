@@ -115,53 +115,12 @@ see [RESTORE.md](docs/RESTORE.md).
 
 ## Architecture
 
-Four tiers with a deliberately narrow waist: the web tier requests, the worker
-executes, the helper escalates. Nothing skips a layer.
+The browser talks to the web plugin, which queues work and accepts uploads only
+into a dedicated ACL-protected intake folder. The unprivileged worker validates
+uploads and handles archive storage. Only tightly scoped system actions pass
+through the root helper.
 
-```mermaid
-flowchart LR
-    subgraph B["Browser"]
-        UI["Admin UI<br/>7 tabs"]
-    end
-
-    subgraph W["Web tier · www-data · no privilege"]
-        FC["Front controller"]
-        CTL["22 routes<br/>CSRF + admin gate"]
-        ORM["Eloquent models"]
-    end
-
-    subgraph K["Worker · librenms"]
-        DISP["Dispatcher<br/>systemd timer"]
-        WK["Backup · verify<br/>restore"]
-        PIPE["tar → zstd → AES-256 + HMAC-SHA256<br/>BRENC1"]
-    end
-
-    subgraph H["Root helper · only escalation"]
-        SOCK["Unix socket<br/>HMAC-SHA256"]
-        OPS["20 operations"]
-        POL["Path allowlist"]
-    end
-
-    DB[("MariaDB")]
-    FS[("Archives +<br/>checkpoints")]
-    APP[("/opt/librenms")]
-
-    UI --> FC --> CTL --> ORM
-    ORM -->|"job row"| DB
-    DISP -->|"claim"| DB
-    DISP --> WK --> PIPE
-    WK -->|"sudo"| SOCK --> OPS --> POL
-    PIPE --> FS
-    POL --> DB
-    POL --> FS
-    POL --> APP
-```
-
-The point of that shape is the privilege boundary. The web tier can write a row
-to `br_jobs` and nothing more — it cannot run a command, read an archive, or
-touch the filesystem. Everything on the right of the diagram happens either as
-the unprivileged `librenms` user or behind the helper's socket, and every path
-the helper touches is checked against an allowlist first.
+![Architecture diagram showing browser, web app, worker, root helper, and local storage](docs/architecture.svg)
 
 ### Component reference
 
@@ -184,33 +143,23 @@ the helper touches is checked against an allowlist first.
    starts a worker. The worker collects components, streams them through
    compression and encryption, writes the archive and its sidecars, verifies it,
    and records the result.
-2. **Restore** — the UI `POST`s with a typed confirmation; preflight runs seven
+2. **Upload/download** — uploads land in the ACL-protected intake folder and
+   the worker validates and verifies them before registration. Authorized admins
+   can download registered archives through the plugin.
+3. **Restore** — the UI `POST`s with a typed confirmation; preflight runs seven
    checks, then the worker drives the nine-stage state machine. Privileged steps
    (import the database, install trees, restart services) go through the helper.
    A verified checkpoint is taken before anything is modified.
-3. **Verify** — retrieves the archive, checks the container, every member's
+4. **Verify** — retrieves the archive, checks the container, every member's
    SHA-256, and at `deep` level gunzips the SQL dump to confirm its schema
    statements and terminator.
-
-For a terminal-only view of the same diagram:
-
-```
- Browser ──HTTPS──▶ Front controller ──▶ 22 routes ──▶ Models ──▶ MariaDB
-                                                                   ▲
-                                                                   │ claim
- Dispatcher (timer) ──▶ Worker ──▶ tar → zstd → AES-256 + HMAC-SHA256 ──▶ Archives
-                          │
-                          └──sudo──▶ Unix socket ──▶ 20 ops ──▶ Path allowlist
-                                                                   │
-                                              MariaDB ◀────────────┴──▶ /opt/librenms
-```
 
 ## Why the privilege model is unusual
 
 Most backup plugins give PHP-FPM a sudo rule, which turns any PHP RCE into root.
-Here the web tier has **no privilege at all**: it writes database rows and nothing
-else. Actual work happens in a worker running as `librenms`, which can invoke
-exactly one command:
+Here the web tier has **no root privilege**: it can queue jobs and write uploads
+only to the restricted intake folder. Actual work happens in a worker running
+as `librenms`, which can invoke exactly one command:
 
 ```sudoers
 librenms ALL=(root) NOPASSWD: /usr/local/libexec/librenms-backup/br-helper

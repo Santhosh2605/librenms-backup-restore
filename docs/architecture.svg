@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="760" viewBox="0 0 1320 760" role="img" aria-labelledby="title desc">
+  <title id="title">LibreNMS Backup and Restore architecture</title>
+  <desc id="desc">Browser, web application, unprivileged worker and constrained root helper coordinate backups and restores on the LibreNMS server.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fbff"/><stop offset="1" stop-color="#edf3fb"/></linearGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#173b71"/><stop offset="1" stop-color="#245fa6"/></linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#24466f" flood-opacity=".11"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#7a91ae"/></marker>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#3574c5"/></marker>
+    <style>
+      text{font-family:Inter,"Segoe UI",Arial,sans-serif;fill:#1d2c42}
+      .title{font-size:30px;font-weight:700;fill:#17365f}.subtitle{font-size:15px;fill:#63758d}
+      .card{fill:#fff;stroke:#dce5f0;stroke-width:1.3;filter:url(#shadow)}
+      .cap{font-size:17px;font-weight:700;fill:#17365f}.meta{font-size:12px;fill:#708198;letter-spacing:.4px}
+      .row{font-size:14px;font-weight:600}.small{font-size:12px;fill:#65778f}.pill{font-size:11px;font-weight:700}
+      .flow{fill:none;stroke:#7a91ae;stroke-width:2.2;marker-end:url(#arrow)}
+      .secure{fill:none;stroke:#3574c5;stroke-width:2.4;marker-end:url(#blueArrow)}
+      .dashed{stroke-dasharray:6 6}.white{fill:#fff}.mutedWhite{fill:#c7d7ec}
+    </style>
+  </defs>
+  <rect width="1320" height="760" rx="24" fill="url(#bg)"/>
+  <text x="52" y="58" class="title">LibreNMS Backup &amp; Restore</text>
+  <text x="52" y="86" class="subtitle">A local-first flow with a clear boundary between the web app, backup worker and root helper</text>
+  <rect x="1070" y="40" width="198" height="34" rx="17" fill="#e4f4ed"/>
+  <circle cx="1090" cy="57" r="5" fill="#2a9d70"/><text x="1104" y="61" class="pill" fill="#247557">STAYS ON YOUR SERVER</text>
+
+  <!-- Main service cards -->
+  <rect x="42" y="132" width="258" height="358" rx="18" class="card"/>
+  <rect x="42" y="132" width="258" height="8" rx="4" fill="#7e68c8"/>
+  <circle cx="76" cy="178" r="18" fill="#efeafd"/><path d="M66 177h20v13H66zM69 171h14v4H69z" fill="none" stroke="#7359bb" stroke-width="2" stroke-linejoin="round"/>
+  <text x="106" y="176" class="cap">Browser</text><text x="106" y="196" class="meta">ADMIN CONSOLE</text>
+  <rect x="62" y="224" width="218" height="64" rx="12" fill="#f7f5ff"/>
+  <text x="78" y="251" class="row">Manage backups</text><text x="78" y="273" class="small">Create · inspect · restore</text>
+  <rect x="62" y="302" width="218" height="64" rx="12" fill="#f7f5ff"/>
+  <text x="78" y="329" class="row">Download archive</text><text x="78" y="351" class="small">Save .brarchive locally</text>
+  <rect x="62" y="380" width="218" height="78" rx="12" fill="#f7f5ff"/>
+  <text x="78" y="407" class="row">Upload archive</text><text x="78" y="430" class="small">Choose .brarchive to restore</text><text x="78" y="448" class="small">after server verification</text>
+  <rect x="62" y="464" width="104" height="19" rx="9" fill="#efeafd"/><text x="75" y="478" class="pill" fill="#7359bb">SESSION + CSRF</text>
+
+  <rect x="354" y="132" width="258" height="358" rx="18" class="card"/>
+  <rect x="354" y="132" width="258" height="8" rx="4" fill="#3478c8"/>
+  <circle cx="388" cy="178" r="18" fill="#e8f2ff"/><path d="M378 173h20v16h-20zM378 174l10 8 10-8" fill="none" stroke="#3478c8" stroke-width="2" stroke-linejoin="round"/>
+  <text x="418" y="176" class="cap">Web app</text><text x="418" y="196" class="meta">PHP-FPM · WWW-DATA</text>
+  <rect x="374" y="224" width="218" height="64" rx="12" fill="#f2f7ff"/>
+  <text x="390" y="251" class="row">Plugin API</text><text x="390" y="273" class="small">Admin checks · CSRF · queue</text>
+  <rect x="374" y="302" width="218" height="64" rx="12" fill="#f2f7ff"/>
+  <text x="390" y="329" class="row">Upload intake</text><text x="390" y="351" class="small">ACL-limited private folder</text>
+  <rect x="374" y="380" width="218" height="64" rx="12" fill="#f2f7ff"/>
+  <text x="390" y="407" class="row">Download stream</text><text x="390" y="429" class="small">Registered, auth-gated archives</text>
+  <rect x="374" y="458" width="168" height="22" rx="11" fill="#e8f2ff"/><text x="390" y="473" class="pill" fill="#2864a8">NO ROOT PERMISSIONS</text>
+
+  <rect x="666" y="132" width="284" height="358" rx="18" class="card"/>
+  <rect x="666" y="132" width="284" height="8" rx="4" fill="#229b84"/>
+  <circle cx="700" cy="178" r="18" fill="#e5f7f3"/><path d="M691 168h18v20h-18zM695 173h10M695 178h10M695 183h7" fill="none" stroke="#208a76" stroke-width="2" stroke-linecap="round"/>
+  <text x="730" y="176" class="cap">Backup worker</text><text x="730" y="196" class="meta">LIBRENMS · UNPRIVILEGED</text>
+  <rect x="686" y="224" width="244" height="64" rx="12" fill="#effaf7"/>
+  <text x="702" y="251" class="row">Dispatcher + job queue</text><text x="702" y="273" class="small">Timer claims work from MariaDB</text>
+  <rect x="686" y="302" width="244" height="64" rx="12" fill="#effaf7"/>
+  <text x="702" y="329" class="row">Backup · verify · restore</text><text x="702" y="351" class="small">Validates uploaded archives</text>
+  <rect x="686" y="380" width="244" height="64" rx="12" fill="#effaf7"/>
+  <text x="702" y="407" class="row">Archive pipeline</text><text x="702" y="429" class="small">tar → zstd → AES-256 + HMAC-SHA256</text>
+  <rect x="686" y="458" width="160" height="22" rx="11" fill="#e5f7f3"/><text x="702" y="473" class="pill" fill="#208a76">VALIDATES BEFORE RESTORE</text>
+
+  <rect x="1004" y="132" width="274" height="358" rx="18" class="card"/>
+  <rect x="1004" y="132" width="274" height="8" rx="4" fill="#e3a538"/>
+  <circle cx="1038" cy="178" r="18" fill="#fff4df"/><path d="M1038 166l11 4v8c0 7-5 11-11 14-6-3-11-7-11-14v-8z" fill="none" stroke="#c48a21" stroke-width="2"/><path d="M1034 178l3 3 6-7" fill="none" stroke="#c48a21" stroke-width="2"/>
+  <text x="1068" y="176" class="cap">Root helper</text><text x="1068" y="196" class="meta">NARROW PRIVILEGED SERVICE</text>
+  <rect x="1024" y="224" width="234" height="64" rx="12" fill="#fff9ed"/>
+  <text x="1040" y="251" class="row">Authenticated socket</text><text x="1040" y="273" class="small">HMAC-SHA256 signed requests</text>
+  <rect x="1024" y="302" width="234" height="64" rx="12" fill="#fff9ed"/>
+  <text x="1040" y="329" class="row">Strict operation policy</text><text x="1040" y="351" class="small">Allowlisted paths and services</text>
+  <rect x="1024" y="380" width="234" height="64" rx="12" fill="#fff9ed"/>
+  <text x="1040" y="407" class="row">Controlled system actions</text><text x="1040" y="429" class="small">DB · services · approved paths</text>
+  <rect x="1024" y="458" width="136" height="22" rx="11" fill="#fff4df"/><text x="1040" y="473" class="pill" fill="#a77316">ROOT-OWNED</text>
+
+  <!-- Main flow arrows -->
+  <path d="M300 258h50" class="secure"/><text x="305" y="244" class="small">HTTPS</text>
+  <path d="M612 258h48" class="flow"/><text x="615" y="244" class="small">job rows</text>
+  <path d="M950 258h48" class="flow"/><text x="953" y="244" class="small">HMAC socket</text>
+  <path d="M354 404h-48" class="secure dashed"/><text x="306" y="396" class="small">download</text>
+  <path d="M300 444h50" class="secure dashed"/><text x="307" y="463" class="small">upload</text>
+
+  <!-- Local data plane -->
+  <rect x="42" y="544" width="1236" height="166" rx="18" fill="#17365f"/>
+  <text x="68" y="579" class="white" font-size="16" font-weight="700">LOCAL SERVER DATA</text>
+  <text x="280" y="579" class="mutedWhite" font-size="12">All archives and restore checkpoints stay on this host until an administrator downloads one.</text>
+  <rect x="68" y="600" width="264" height="78" rx="12" fill="#244b78"/>
+  <text x="88" y="630" class="white" font-size="14" font-weight="700">Upload intake</text><text x="88" y="653" class="mutedWhite" font-size="12">ACL-protected · worker verifies first</text>
+  <rect x="358" y="600" width="300" height="78" rx="12" fill="#244b78"/>
+  <text x="378" y="630" class="white" font-size="14" font-weight="700">Archive + checkpoints</text><text x="378" y="653" class="mutedWhite" font-size="12">Encrypted .brarchive files · checksums · manifests</text>
+  <rect x="684" y="600" width="244" height="78" rx="12" fill="#244b78"/>
+  <text x="704" y="630" class="white" font-size="14" font-weight="700">MariaDB</text><text x="704" y="653" class="mutedWhite" font-size="12">Jobs · history · restore state</text>
+  <rect x="954" y="600" width="298" height="78" rx="12" fill="#244b78"/>
+  <text x="974" y="630" class="white" font-size="14" font-weight="700">LibreNMS system</text><text x="974" y="653" class="mutedWhite" font-size="12">Application · services · approved config paths</text>
+  <path d="M486 490v48" class="flow"/><path d="M808 490v48" class="flow"/><path d="M1138 490v48" class="flow"/>
+</svg>
