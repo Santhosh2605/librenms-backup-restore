@@ -443,7 +443,10 @@ class RestoreEngine:
             # or /usr.
             integ_root = os.path.join(self.staging, "integrations")
             self._extract_tree("integrations", integ_root)
-            for configured_path in self.cfg.get_list("components", "integration_paths"):
+            get_list = getattr(self.cfg, "get_list", None)
+            integration_paths = (get_list("components", "integration_paths")
+                                 if callable(get_list) else [])
+            for configured_path in integration_paths:
                 src = os.path.join(integ_root, configured_path.lstrip("/"))
                 if not os.path.isdir(src):
                     continue

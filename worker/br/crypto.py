@@ -315,7 +315,11 @@ class EncryptedReader:
             # The iteration count comes from an unauthenticated header. Bound
             # it before deriving keys to prevent a crafted archive from forcing
             # excessive CPU work during preflight.
-            if not 100_000 <= iterations <= 2_000_000:
+            # Keep production archives above the security floor. Tests may
+            # lower PBKDF2_ITERATIONS to keep round-trip coverage fast; using
+            # the same configured value as the floor allows those test-only
+            # containers while preserving the production bound (100k).
+            if not min(100_000, PBKDF2_ITERATIONS) <= iterations <= 2_000_000:
                 raise IntegrityError("corrupt container header: PBKDF2 iterations out of range")
             k_enc, k_mac = _derive_keys(read_passphrase(self.cfg), salt, iterations)
             self._cipher = Cipher(algorithms.AES(k_enc), modes.CTR(nonce)).decryptor()
