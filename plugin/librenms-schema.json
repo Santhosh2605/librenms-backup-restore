@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "owned_tables": [
+    "br_audit_events",
+    "br_backups",
+    "br_checkpoints",
+    "br_jobs",
+    "br_restores",
+    "br_schedules",
+    "br_settings"
+  ],
+  "json_columns": {
+    "br_backups": ["components"],
+    "br_restores": ["options"]
+  }
+}
