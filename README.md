@@ -122,6 +122,51 @@ For custom users, configuration options, and troubleshooting, see the
 [installation reference](docs/INSTALL.md). For restore and recovery instructions,
 see [RESTORE.md](docs/RESTORE.md).
 
+### Optional: LibreNMS database-validator compatibility patch
+
+Some LibreNMS versions report this plugin's `br_*` tables as unexpected and
+offer to drop them. MariaDB also reports the plugin's JSON columns with the
+`utf8mb4_bin` collation. **Do not use LibreNMS's automatic database repair for
+these warnings**; its suggested SQL can delete the plugin's tables.
+
+The project includes a preparer that backs up the current LibreNMS validator
+files and generates a reviewable patch without modifying LibreNMS core. From
+the project checkout, run:
+
+```bash
+sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/librenms
+```
+
+The command prints a timestamped bundle directory under
+`plugin/support/librenms-validator/`. Review its `README.txt`, saved files in
+`backup/`, patched copies in `patched/`, and `librenms-validator-fix.patch`.
+Replace `<timestamp>` below with the directory name printed by the command:
+
+```bash
+PATCH="/opt/librenms-backup-restore/plugin/support/librenms-validator/<timestamp>/librenms-validator-fix.patch"
+sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
+```
+
+Continue only if the dry run succeeds for every file. Applying the patch changes
+LibreNMS core files and adds a validator helper. Then install the plugin's
+schema manifest and set the new helper's owner:
+
+```bash
+sudo patch -p1 -d /opt/librenms < "$PATCH"
+sudo install -o librenms -g librenms -m 0644 \
+  /opt/librenms-backup-restore/plugin/librenms-schema.json \
+  /opt/librenms/app/Plugins/BackupRestore/librenms-schema.json
+sudo chown librenms:librenms /opt/librenms/LibreNMS/DB/PluginSchema.php
+sudo -u librenms /opt/librenms/validate.php
+```
+
+The validator should then accept the declared plugin tables and JSON columns.
+It will still report unrelated unexpected tables or actual collation problems.
+LibreNMS may warn that these files are locally modified, and a future LibreNMS
+update may replace the patch. Keep the timestamped backups and diff so the
+change can be reviewed and reapplied or moved into an upstream LibreNMS change.
+Do not run `lnms patch:remove --reset`, which discards local patches.
+
 ## What it does
 
 - **Five components, selectable per run** — database, RRD, application, system,
@@ -200,6 +245,7 @@ it deliberately does *not* protect against.
 | Document | Contents |
 |---|---|
 | [INSTALL.md](docs/INSTALL.md) | Requirements, installer, keys, verification, troubleshooting table |
+| [LIBRENMS-VALIDATOR-PATCH.md](docs/LIBRENMS-VALIDATOR-PATCH.md) | Prepare, review, and apply the optional LibreNMS schema-validator compatibility patch |
 | [RESTORE.md](docs/RESTORE.md) | Restore runbook, rehearsal checklist, manual recovery, rollback |
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
