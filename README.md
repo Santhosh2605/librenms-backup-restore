@@ -162,10 +162,79 @@ sudo -u librenms /opt/librenms/validate.php
 
 The validator should then accept the declared plugin tables and JSON columns.
 It will still report unrelated unexpected tables or actual collation problems.
-LibreNMS may warn that these files are locally modified, and a future LibreNMS
-update may replace the patch. Keep the timestamped backups and diff so the
-change can be reviewed and reapplied or moved into an upstream LibreNMS change.
-Do not run `lnms patch:remove --reset`, which discards local patches.
+LibreNMS will warn that these core files are locally modified. **Do not run
+`lnms patch:remove --reset`**; it discards local patches, including the helper.
+
+#### Updating LibreNMS later
+
+Keep the timestamped bundle from the preparer. It contains the original core
+files and the patch. Before updating, replace `<timestamp>` below with that
+bundle's name, then back up the currently working patch, restore the original
+core files, and move the helper and manifest out of LibreNMS:
+
+```bash
+PROJECT=/opt/librenms-backup-restore
+LIBRENMS=/opt/librenms
+BUNDLE="$PROJECT/plugin/support/librenms-validator/<timestamp>"
+SAVE="$PROJECT/plugin/support/librenms-validator/update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -m 0700 "$SAVE"
+sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
+sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php"
+sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php"
+sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php"
+sudo mv "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
+sudo mv "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
+sudo -u librenms git -C "$LIBRENMS" status --short
+```
+
+Confirm the three validator files no longer appear as modified. If any local
+LibreNMS files remain listed, stop and review them before updating. The `SAVE`
+directory contains the working patch files in case you need to restore them.
+If the update advances LibreNMS to a new revision, do not copy these old files
+back over it; regenerate and review the patch for the new version.
+
+Then update:
+
+```bash
+cd /opt/librenms
+sudo -u librenms ./daily.sh
+```
+
+After the update, generate a **new** patch against the updated LibreNMS files:
+
+```bash
+cd /opt/librenms-backup-restore
+sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/librenms
+```
+
+Set `NEW_BUNDLE` to the timestamped directory printed by the command. Review
+the patch, then dry-run it:
+
+```bash
+NEW_BUNDLE="/opt/librenms-backup-restore/plugin/support/librenms-validator/<new timestamp>"
+PATCH="$NEW_BUNDLE/librenms-validator-fix.patch"
+sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
+```
+
+If every file passes, reapply the fix to the updated core and restore the
+manifest:
+
+```bash
+sudo patch -p1 -d /opt/librenms < "$PATCH"
+sudo install -o librenms -g librenms -m 0644 \
+  /opt/librenms-backup-restore/plugin/librenms-schema.json \
+  /opt/librenms/app/Plugins/BackupRestore/librenms-schema.json
+sudo chown librenms:librenms /opt/librenms/LibreNMS/DB/PluginSchema.php
+sudo -u librenms /opt/librenms/validate.php
+```
+
+These are the restore steps for the fix after updating. Do not copy the old
+patched files from `SAVE` onto a newer LibreNMS version. If patch preparation
+or the dry run fails, stop; the patch needs review for the updated version.
 
 ## What it does
 
