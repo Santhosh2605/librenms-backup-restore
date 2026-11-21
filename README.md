@@ -179,10 +179,37 @@ cd /opt/librenms
 sudo -u librenms ./daily.sh
 ```
 
-After the update, generate a **new** patch against the updated LibreNMS files.
-Review it, dry-run it, and apply it using the steps above. Do not copy the old
-patched files onto the updated core. If patch preparation or the dry run fails,
-stop; the LibreNMS code changed and the patch needs review for the new version.
+After the update, generate a **new** patch against the updated LibreNMS files:
+
+```bash
+cd /opt/librenms-backup-restore
+sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/librenms
+```
+
+Set `NEW_BUNDLE` to the timestamped directory printed by the command. Review
+the patch, then dry-run it:
+
+```bash
+NEW_BUNDLE="/opt/librenms-backup-restore/plugin/support/librenms-validator/<new timestamp>"
+PATCH="$NEW_BUNDLE/librenms-validator-fix.patch"
+sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
+```
+
+If every file passes, reapply the fix to the updated core and restore the
+manifest:
+
+```bash
+sudo patch -p1 -d /opt/librenms < "$PATCH"
+sudo install -o librenms -g librenms -m 0644 \
+  /opt/librenms-backup-restore/plugin/librenms-schema.json \
+  /opt/librenms/app/Plugins/BackupRestore/librenms-schema.json
+sudo chown librenms:librenms /opt/librenms/LibreNMS/DB/PluginSchema.php
+sudo -u librenms /opt/librenms/validate.php
+```
+
+These are the restore steps for the fix after updating. Do not copy the old
+patched files from `SAVE` onto a newer LibreNMS version. If patch preparation
+or the dry run fails, stop; the patch needs review for the updated version.
 
 ## What it does
 
