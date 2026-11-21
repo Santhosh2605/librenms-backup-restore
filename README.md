@@ -137,10 +137,52 @@ sudo -u librenms /opt/librenms/validate.php
 
 The validator should then accept the declared plugin tables and JSON columns.
 It will still report unrelated unexpected tables or actual collation problems.
-LibreNMS may warn that these files are locally modified, and a future LibreNMS
-update may replace the patch. Keep the timestamped backups and diff so the
-change can be reviewed and reapplied or moved into an upstream LibreNMS change.
-Do not run `lnms patch:remove --reset`, which discards local patches.
+LibreNMS will warn that these core files are locally modified. **Do not run
+`lnms patch:remove --reset`**; it discards local patches, including the helper.
+
+#### Updating LibreNMS later
+
+Keep the timestamped bundle from the preparer. It contains the original core
+files and the patch. Before updating, replace `<timestamp>` below with that
+bundle's name, then back up the currently working patch, restore the original
+core files, and move the helper and manifest out of LibreNMS:
+
+```bash
+PROJECT=/opt/librenms-backup-restore
+LIBRENMS=/opt/librenms
+BUNDLE="$PROJECT/plugin/support/librenms-validator/<timestamp>"
+SAVE="$PROJECT/plugin/support/librenms-validator/update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -m 0700 "$SAVE"
+sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
+sudo cp -a "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
+sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php"
+sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php"
+sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php"
+sudo mv "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
+sudo mv "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
+sudo -u librenms git -C "$LIBRENMS" status --short
+```
+
+Confirm the three validator files no longer appear as modified. If any local
+LibreNMS files remain listed, stop and review them before updating. The `SAVE`
+directory contains the working patch files in case you need to restore them.
+If the update advances LibreNMS to a new revision, do not copy these old files
+back over it; regenerate and review the patch for the new version.
+
+Then update:
+
+```bash
+cd /opt/librenms
+sudo -u librenms ./daily.sh
+```
+
+After the update, generate a **new** patch against the updated LibreNMS files.
+Review it, dry-run it, and apply it using the steps above. Do not copy the old
+patched files onto the updated core. If patch preparation or the dry run fails,
+stop; the LibreNMS code changed and the patch needs review for the new version.
 
 ## What it does
 
@@ -221,7 +263,6 @@ it deliberately does *not* protect against.
 |---|---|
 | [INSTALL.md](docs/INSTALL.md) | Requirements, installer, keys, verification, troubleshooting table |
 | [LIBRENMS-VALIDATOR-PATCH.md](docs/LIBRENMS-VALIDATOR-PATCH.md) | Prepare, review, and apply the optional LibreNMS schema-validator compatibility patch |
-| [LIBRENMS-UPDATE-WITH-LOCAL-PATCH.md](docs/LIBRENMS-UPDATE-WITH-LOCAL-PATCH.md) | Back up, update LibreNMS, and reprepare the local validator patch safely |
 | [RESTORE.md](docs/RESTORE.md) | Restore runbook, rehearsal checklist, manual recovery, rollback |
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
