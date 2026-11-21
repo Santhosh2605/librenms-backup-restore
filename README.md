@@ -221,6 +221,7 @@ it deliberately does *not* protect against.
 |---|---|
 | [INSTALL.md](docs/INSTALL.md) | Requirements, installer, keys, verification, troubleshooting table |
 | [LIBRENMS-VALIDATOR-PATCH.md](docs/LIBRENMS-VALIDATOR-PATCH.md) | Prepare, review, and apply the optional LibreNMS schema-validator compatibility patch |
+| [LIBRENMS-UPDATE-WITH-LOCAL-PATCH.md](docs/LIBRENMS-UPDATE-WITH-LOCAL-PATCH.md) | Back up, update LibreNMS, and reprepare the local validator patch safely |
 | [RESTORE.md](docs/RESTORE.md) | Restore runbook, rehearsal checklist, manual recovery, rollback |
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
