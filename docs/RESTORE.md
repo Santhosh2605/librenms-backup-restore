@@ -23,6 +23,11 @@ upload the `.brarchive` file, and wait for server-side validation and verificati
 to finish. The verified archive will then appear in the restore selector. The
 upload is kept on the server; no cloud service is involved.
 
+If the same archive was previously deleted in Backup Management, uploading it
+again restores its deleted history entry after the archive is verified. The
+server rejects the upload if a live backup record or archive file with that
+backup ID still exists.
+
 ## Rehearse first
 
 The rehearsal is the same code path as the real thing, on a disposable target.

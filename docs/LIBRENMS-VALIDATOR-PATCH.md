@@ -33,3 +33,11 @@ will preserve those same JSON columns when it reruns.
 The script fails closed if expected source sections do not match the installed
 LibreNMS version. Review `librenms-validator-fix.patch` and the saved originals
 before applying anything to a separate LibreNMS checkout.
+
+For the step-by-step update and reapply procedure, see the README section
+“Updating LibreNMS later.” If a command or validation result differs from the
+expected output, see
+[LIBRENMS-VALIDATOR-TROUBLESHOOTING.md](LIBRENMS-VALIDATOR-TROUBLESHOOTING.md).
+The update procedure uses `scripts/pre-update-librenms-validator.sh` and
+`scripts/post-update-librenms-validator.sh` so users do not need to manually
+select bundle timestamps or restore individual core files.

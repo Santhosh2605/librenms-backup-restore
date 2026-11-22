@@ -140,10 +140,14 @@ sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/li
 The command prints a timestamped bundle directory under
 `plugin/support/librenms-validator/`. Review its `README.txt`, saved files in
 `backup/`, patched copies in `patched/`, and `librenms-validator-fix.patch`.
-Replace `<timestamp>` below with the directory name printed by the command:
+Select the newest generated bundle automatically:
 
 ```bash
-PATCH="/opt/librenms-backup-restore/plugin/support/librenms-validator/<timestamp>/librenms-validator-fix.patch"
+PROJECT=/opt/librenms-backup-restore
+BUNDLE=$(find "$PROJECT/plugin/support/librenms-validator" -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
+test -n "$BUNDLE" && test -f "$BUNDLE/librenms-validator-fix.patch" || { echo "Validator patch bundle not found"; exit 1; }
+printf 'Using bundle: %s\n' "$BUNDLE"
+PATCH="$BUNDLE/librenms-validator-fix.patch"
 sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
 ```
 
@@ -167,74 +171,34 @@ LibreNMS will warn that these core files are locally modified. **Do not run
 
 #### Updating LibreNMS later
 
-Keep the timestamped bundle from the preparer. It contains the original core
-files and the patch. Before updating, replace `<timestamp>` below with that
-bundle's name, then back up the currently working patch, restore the original
-core files, and move the helper and manifest out of LibreNMS:
-
-```bash
-PROJECT=/opt/librenms-backup-restore
-LIBRENMS=/opt/librenms
-BUNDLE="$PROJECT/plugin/support/librenms-validator/<timestamp>"
-SAVE="$PROJECT/plugin/support/librenms-validator/update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
-sudo install -d -m 0700 "$SAVE"
-sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
-sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php"
-sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php"
-sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php"
-sudo mv "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
-sudo mv "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
-sudo -u librenms git -C "$LIBRENMS" status --short
-```
-
-Confirm the three validator files no longer appear as modified. If any local
-LibreNMS files remain listed, stop and review them before updating. The `SAVE`
-directory contains the working patch files in case you need to restore them.
-If the update advances LibreNMS to a new revision, do not copy these old files
-back over it; regenerate and review the patch for the new version.
-
-Then update:
-
-```bash
-cd /opt/librenms
-sudo -u librenms ./daily.sh
-```
-
-After the update, generate a **new** patch against the updated LibreNMS files:
+Use the two scripts in order. The first script finds the bundle matching the
+currently applied patch, saves the patched files and plugin manifest, restores
+the original LibreNMS files, and runs LibreNMS's normal `daily.sh` update. It
+stops without updating if it cannot match the installed patch to a saved bundle.
 
 ```bash
 cd /opt/librenms-backup-restore
-sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/librenms
+sudo bash scripts/pre-update-librenms-validator.sh
 ```
 
-Set `NEW_BUNDLE` to the timestamped directory printed by the command. Review
-the patch, then dry-run it:
+After `daily.sh` completes, run the second script. It prepares a new patch
+against the updated LibreNMS files, dry-runs it, applies it only if the dry run
+passes, and restores the saved plugin manifest. It also fixes the new helper's
+ownership.
 
 ```bash
-NEW_BUNDLE="/opt/librenms-backup-restore/plugin/support/librenms-validator/<new timestamp>"
-PATCH="$NEW_BUNDLE/librenms-validator-fix.patch"
-sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
+sudo bash scripts/post-update-librenms-validator.sh
 ```
 
-If every file passes, reapply the fix to the updated core and restore the
-manifest:
-
-```bash
-sudo patch -p1 -d /opt/librenms < "$PATCH"
-sudo install -o librenms -g librenms -m 0644 \
-  /opt/librenms-backup-restore/plugin/librenms-schema.json \
-  /opt/librenms/app/Plugins/BackupRestore/librenms-schema.json
-sudo chown librenms:librenms /opt/librenms/LibreNMS/DB/PluginSchema.php
-sudo -u librenms /opt/librenms/validate.php
-```
-
-These are the restore steps for the fix after updating. Do not copy the old
-patched files from `SAVE` onto a newer LibreNMS version. If patch preparation
-or the dry run fails, stop; the patch needs review for the updated version.
+The scripts keep a timestamped backup and a compressed copy under
+`plugin/support/librenms-validator/update-backups/`. They never copy an old
+patched LibreNMS file over a newer LibreNMS version. If patch preparation or
+the dry run fails, the post-update script stops and leaves the new patch bundle
+for review. If the pre-update script reports that `daily.sh` failed, resolve
+the reported update issue and run the post-update script; it retries `daily.sh`
+before preparing the new patch. Run validation afterward and decline automatic database repairs.
+For common command and validation errors, see the
+[LibreNMS validator patch troubleshooting guide](docs/LIBRENMS-VALIDATOR-TROUBLESHOOTING.md).
 
 ## What it does
 
@@ -315,6 +279,7 @@ it deliberately does *not* protect against.
 |---|---|
 | [INSTALL.md](docs/INSTALL.md) | Requirements, installer, keys, verification, troubleshooting table |
 | [LIBRENMS-VALIDATOR-PATCH.md](docs/LIBRENMS-VALIDATOR-PATCH.md) | Prepare, review, and apply the optional LibreNMS schema-validator compatibility patch |
+| [LIBRENMS-VALIDATOR-TROUBLESHOOTING.md](docs/LIBRENMS-VALIDATOR-TROUBLESHOOTING.md) | Troubleshoot patch bundle paths, apply errors, and validation results |
 | [RESTORE.md](docs/RESTORE.md) | Restore runbook, rehearsal checklist, manual recovery, rollback |
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
