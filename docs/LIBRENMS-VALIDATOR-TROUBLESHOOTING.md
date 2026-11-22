@@ -4,24 +4,14 @@ This guide covers the optional validator compatibility patch described in the
 [README](../README.md#optional-librenms-database-validator-compatibility-patch).
 It does not replace the backup and review steps in that section.
 
-## The patch path contains `<timestamp>` or `<new timestamp>`
+## The patch path contains a timestamp placeholder
 
-Those angle-bracket values are placeholders, not literal directory names. Use
-the bundle path printed by `prepare_librenms_validator_patch.py`. For example,
-if it prints:
+Angle-bracket values such as `<timestamp>` are placeholders and should not be
+copied literally. The following command selects the newest generated bundle
+without asking the user to enter a timestamp:
 
-```text
-Patch bundle prepared under: /opt/librenms-backup-restore/plugin/support/librenms-validator/20261122T061237Z
-```
-
-set the bundle and patch paths like this:
-
-```bash
-BUNDLE=/opt/librenms-backup-restore/plugin/support/librenms-validator/20261122T061237Z
-PATCH="$BUNDLE/librenms-validator-fix.patch"
-```
-
-You can also select the newest generated bundle automatically:
+Select the newest generated bundle automatically; no timestamp needs to be
+entered by hand:
 
 ```bash
 PROJECT=/opt/librenms-backup-restore
@@ -82,12 +72,15 @@ ls -l /opt/librenms/LibreNMS/DB/PluginSchema.php
 ```
 
 For a normal LibreNMS update, restore the original validator files from the
-matching bundle before running `daily.sh`; verify they no longer reference
-`PluginSchema`. After the update, prepare and review a new patch, dry-run it,
-apply it, and install the manifest as described in the README. Do not copy an
-old helper or old patched validator files over a newer LibreNMS version. If the
-matching original files or bundle are unavailable, stop and recover them from
-the saved update backup or bundle before proceeding.
+matching bundle before running `daily.sh`. The README's restore block locates
+all original files under the bundle's `backup/` folder, restores them while
+preserving their LibreNMS paths, and automatically stops if the restored
+collation validator still references `PluginSchema`. After the update, prepare
+and review a new patch, dry-run it, apply it, and install the manifest as
+described in the README. Do not copy an old helper or old patched validator
+files over a newer LibreNMS version. If the matching original files or bundle
+are unavailable, stop and recover them from the saved update backup or bundle
+before proceeding.
 
 ## Validation again reports the plugin's `br_*` tables or JSON columns
 

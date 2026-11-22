@@ -152,6 +152,7 @@ currently applied patch, then back up the currently working patch, restore the
 original core files, and move the helper and manifest out of LibreNMS:
 
 ```bash
+set -euo pipefail
 PROJECT=/opt/librenms-backup-restore
 LIBRENMS=/opt/librenms
 BUNDLE=$(find "$PROJECT/plugin/support/librenms-validator" -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
@@ -159,14 +160,26 @@ test -n "$BUNDLE" || { echo "Validator patch bundle not found"; exit 1; }
 printf 'Using bundle: %s\n' "$BUNDLE"
 SAVE="$PROJECT/plugin/support/librenms-validator/update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 sudo install -d -m 0700 "$SAVE"
-sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$SAVE/"
+find "$BUNDLE/backup" -type f -print0 | while IFS= read -r -d '' ORIGINAL; do
+  RELATIVE_PATH=${ORIGINAL#"$BUNDLE/backup/"}
+  CURRENT="$LIBRENMS/$RELATIVE_PATH"
+  test -f "$CURRENT" || { echo "Expected patched file is missing: $CURRENT"; exit 1; }
+  sudo install -D -m 0600 "$CURRENT" "$SAVE/$RELATIVE_PATH" || exit 1
+done || { echo "Could not save current patched files; stop before updating LibreNMS"; exit 1; }
 sudo cp -a "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
 sudo cp -a "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
-sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php"
-sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/LibreNMS/Validations/Database/CheckSchemaStructure.php" "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaStructure.php"
-sudo install -o librenms -g librenms -m 0644 "$BUNDLE/backup/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php" "$LIBRENMS/database/migrations/2021_02_09_122930_migrate_to_utf8mb4.php"
+BACKUP_DIR="$BUNDLE/backup"
+test -d "$BACKUP_DIR" || { echo "Original files not found in selected bundle"; exit 1; }
+find "$BACKUP_DIR" -type f -print -quit | grep -q . || { echo "Bundle contains no original files"; exit 1; }
+set -o pipefail
+find "$BACKUP_DIR" -type f -print0 | while IFS= read -r -d '' SOURCE; do
+  RELATIVE_PATH=${SOURCE#"$BACKUP_DIR/"}
+  sudo install -D -o librenms -g librenms -m 0644 "$SOURCE" "$LIBRENMS/$RELATIVE_PATH" || exit 1
+done || { echo "Failed to restore original files; stop before updating LibreNMS"; exit 1; }
+if grep -q PluginSchema "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php"; then
+  echo "Original validator was not restored; stop before updating LibreNMS"
+  exit 1
+fi
 sudo mv "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
 sudo mv "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
 sudo -u librenms git -C "$LIBRENMS" status --short
