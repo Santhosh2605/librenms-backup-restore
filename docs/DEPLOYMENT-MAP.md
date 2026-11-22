@@ -355,5 +355,5 @@ previous version in `/opt/librenms-backup-restore.previous`.
 
 ---
 
-*See also: `docs/INSTALL.md` for the installation procedure and
-`docs/SECURITY.md` for the threat model.*
+*See also: the [README installation reference](../README.md#installation-reference)
+and `docs/SECURITY.md` for the threat model.*

@@ -20,7 +20,7 @@ use Illuminate\Support\Str;
  * JSON API for the Backup & Restore GUI.
  *
  * Reached only through the explicitly registered entrypoint
- * html/plugin-backuprestore.php (see docs/INSTALL.md "Why not routes?").
+ * html/plugin-backuprestore.php (see docs/ARCHITECTURE.md for the routing detail).
  *
  * Contract:
  *   GET  endpoints -> read-only, `view` ability
