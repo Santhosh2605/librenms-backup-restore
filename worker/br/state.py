@@ -158,6 +158,22 @@ class Store:
     def backup(self, backup_ref: str) -> dict | None:
         return self.query_one("SELECT * FROM br_backups WHERE backup_ref=%s", (backup_ref,))
 
+    def backup_revive(self, backup_ref: str, *, path: str, size_bytes: int,
+                      sha256: str) -> bool:
+        """Restore a soft-deleted backup row after its archive is re-imported.
+
+        The backup reference is unique and the deleted row is retained for
+        history, so re-import must revive that row instead of inserting a
+        duplicate. The caller must first confirm the old archive is absent.
+        """
+        return self.execute(
+            "UPDATE br_backups SET status='completed', verified_status='unverified', "
+            "path=%s, destination='local', size_bytes=%s, sha256=%s, "
+            "verified_at=NULL, deleted_at=NULL, error_message=NULL "
+            "WHERE backup_ref=%s AND status='deleted'",
+            (path, int(size_bytes), sha256, backup_ref),
+        ) == 1
+
     # -- restores -----------------------------------------------------------
 
     def restore_update_state(self, restore_id: str, state: str, *,

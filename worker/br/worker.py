@@ -335,8 +335,12 @@ class Worker:
             manifest = manifest_mod.validate(_manifest_from_archive(real_input, self.cfg, self.log))
             backup_ref = manifest["backup_id"]
             destination = os.path.join(self.cfg.archive_dir, f"{backup_ref}.brarchive")
-            if self.store.backup(backup_ref) or os.path.exists(destination):
+            existing = self.store.backup(backup_ref)
+            if existing and existing.get("status") != "deleted":
                 raise ValidationError(f"backup {backup_ref} already exists on this server")
+            previous_path = str((existing or {}).get("path") or "")
+            if os.path.exists(destination) or (previous_path and os.path.exists(previous_path)):
+                raise ValidationError(f"backup {backup_ref} archive file still exists on this server")
             upload_size = os.path.getsize(real_input)
             reserve = self.cfg.get_int("general", "headroom_mib", 512) * 1024 * 1024
             if shutil.disk_usage(self.cfg.archive_dir).free < upload_size + reserve:
@@ -355,7 +359,24 @@ class Worker:
             os.replace(temp_path, destination)
             temp_path = None
             _write_sidecar(destination, digest.hexdigest())
-            self.adopt_orphans()
+            self._write_manifest_sidecar(destination, manifest)
+            if existing:
+                revived = self.store.backup_revive(
+                    backup_ref,
+                    path=destination,
+                    size_bytes=upload_size,
+                    sha256=digest.hexdigest(),
+                )
+                if not revived:
+                    os.unlink(destination)
+                    try:
+                        os.unlink(destination + ".sha256")
+                    except FileNotFoundError:
+                        pass
+                    raise BRException("deleted backup record could not be restored")
+                self.log.info("restored deleted backup record", backup=backup_ref)
+            else:
+                self.adopt_orphans()
             if not self.store.backup(backup_ref):
                 raise BRException("uploaded archive could not be registered")
             self.log.info("uploaded archive registered", backup=backup_ref)
