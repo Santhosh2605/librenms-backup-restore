@@ -10,6 +10,20 @@ use semantic versioning.
 - `scripts/upgrade.sh` now stages its source when run from the installed project
   directory, so rotating that directory to `.previous` cannot hide `install.sh`
   before the upgrade starts.
+## [1.0.3] — 2026-11-18
+
+### Fixed — history actions use fresh archive references
+
+The history screen now ships with a new asset version so browsers discard
+cached JavaScript that sent database row IDs instead of archive references to
+the Details, Verify, and Download endpoints. Those endpoints require the
+`br-...` archive reference.
+
+### Fixed — encryption validation matches the configured scheme
+
+The installer consistently sets AES-256-CTR with HMAC-SHA256, including when
+updating an existing configuration, and validation checks the key material for
+the selected scheme.
 
 ## [1.0.2] — 2026-11-11
 
