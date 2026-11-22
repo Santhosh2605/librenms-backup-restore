@@ -135,27 +135,12 @@ sudo apt-get install -y git python3 python3-pymysql python3-cryptography \
                         zstd mariadb-client rsync acl
 ```
 
-#### Download as a ZIP or release tarball
+#### Download archives
 
-The clone command above is the simplest option. To install without Git, download
-the ZIP from GitHub's **Code → Download ZIP** menu, copy it to the server, then
-extract it:
-
-```bash
-sudo apt-get install -y unzip
-cd /tmp
-sudo unzip -o ~/librenms-backup-restore-main.zip
-cd /tmp/librenms-backup-restore-main
-sudo chmod +x scripts/*.sh
-sudo bash scripts/install.sh
-```
-
-GitHub names the extracted folder `librenms-backup-restore-main`; release
-tarballs use a versioned folder name, for example
-`librenms-backup-restore-1.0.2.tar.gz`. Unpack a downloaded release tarball
-with `sudo tar -xzf librenms-backup-restore-1.0.2.tar.gz -C /opt/`, then
-continue from its extracted directory. ZIP files do not preserve executable
-permissions, so run `chmod +x` before running scripts directly.
+The ZIP and release tarball download steps are described above. GitHub ZIPs
+extract to a folder ending in `-main` and do not preserve executable bits; run
+`chmod +x scripts/*.sh` after extracting and before running scripts directly.
+Release tarballs use a versioned filename and folder.
 
 #### Ubuntu 26.04 sudo compatibility
 
