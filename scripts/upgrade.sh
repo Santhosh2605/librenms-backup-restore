@@ -3,7 +3,7 @@
 # LibreNMS Backup & Restore - upgrade script
 #
 # Usage:
-#   sudo ./scripts/upgrade.sh            # install the code in this checkout
+#   sudo ./scripts/upgrade.sh            # upgrade from this checkout
 #   sudo ./scripts/upgrade.sh --from-git <ref>
 #
 # Guarantees:
@@ -20,6 +20,7 @@ APP_USER="${APP_USER:-librenms}"
 PHP_BIN="$(command -v php || echo /usr/bin/php)"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_TS="$(date -u +%Y%m%dT%H%M%SZ)"
+SOURCE_SNAPSHOT=""
 
 ok()   { printf '\033[32m  ok\033[0m  %s\n' "$*"; }
 info() { printf '\033[36m  ..\033[0m  %s\n' "$*"; }
@@ -27,6 +28,18 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die()  { printf '\033[31mFAIL\033[0m  %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "run as root"
+
+# PREFIX is normally also the Git checkout, which is the source tree this
+# script is running from. Stage a copy before rotating PREFIX to .previous;
+# otherwise the install.sh path disappears along with its parent directory.
+if [[ "$(realpath "$SRC_DIR")" == "$(realpath -m "$PREFIX")" ]]; then
+    SOURCE_SNAPSHOT="${PREFIX}.upgrade-source-${BACKUP_TS}"
+    [[ ! -e "$SOURCE_SNAPSHOT" ]] || die "upgrade source snapshot already exists: $SOURCE_SNAPSHOT"
+    install -d -m 0700 "$SOURCE_SNAPSHOT"
+    rsync -a --exclude='.git' "$SRC_DIR/" "$SOURCE_SNAPSHOT/"
+    SRC_DIR="$SOURCE_SNAPSHOT"
+    ok "staged upgrade source at $SOURCE_SNAPSHOT"
+fi
 
 step "1. Pre-upgrade safety"
 if [[ -f "$PREFIX/scripts/br-schema.php" ]]; then
@@ -86,6 +99,13 @@ bash "$PREFIX/scripts/validate-install.sh" || {
     printf '  rm -rf %s && mv %s.previous %s\n' "$PREFIX" "$PREFIX" "$PREFIX"
     exit 1
 }
+
+if [[ -n "$SOURCE_SNAPSHOT" ]]; then
+    [[ "$SOURCE_SNAPSHOT" == "${PREFIX}.upgrade-source-${BACKUP_TS}" ]] \
+        || die "refusing to remove unexpected upgrade source snapshot: $SOURCE_SNAPSHOT"
+    rm -rf -- "$SOURCE_SNAPSHOT"
+    ok "removed temporary upgrade source snapshot"
+fi
 
 cat <<EOF
 
