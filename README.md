@@ -259,7 +259,6 @@ it deliberately does *not* protect against.
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
 | [SCHEDULER.md](docs/SCHEDULER.md) | Timers, job lifecycle, GFS retention |
-| [STATUS.md](docs/STATUS.md) | Current build status by phase |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Release notes and known limitations |
 
 ## Testing

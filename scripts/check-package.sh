@@ -36,7 +36,6 @@ for path in \
     config/br.conf.example config/br-sudoers config/logrotate/librenms-backup \
     docs/DEPLOYMENT-MAP.md \
     docs/INSTALL-STEP-BY-STEP.md \
-    docs/GITHUB-DESCRIPTION.md \
     config/systemd/br-helper.service \
     config/systemd/librenms-backup-dispatch.service \
     config/systemd/librenms-backup-dispatch.timer \

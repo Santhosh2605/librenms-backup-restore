@@ -355,5 +355,5 @@ previous version in `/opt/librenms-backup-restore.previous`.
 
 ---
 
-*See also: `docs/INSTALL.md` for the full procedure, `docs/SECURITY.md` for the
-threat model, and `docs/PROJECT-DOCUMENTATION.html` for the project report.*
+*See also: `docs/INSTALL.md` for the installation procedure and
+`docs/SECURITY.md` for the threat model.*
