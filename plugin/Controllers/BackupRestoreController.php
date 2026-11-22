@@ -403,10 +403,17 @@ class BackupRestoreController
             'ok' => $backup->verified_status === 'verified',
             'detail' => 'verification status: ' . $backup->verified_status,
         ];
+        $currentKeyFingerprint = $this->workerKeyFingerprint();
+        $keyFingerprintOk = ! $backup->key_fingerprint
+            || ($currentKeyFingerprint !== null
+                && hash_equals($currentKeyFingerprint, (string) $backup->key_fingerprint));
         $checks[] = [
             'name' => 'encryption_key',
-            'ok' => ! $backup->key_fingerprint || $backup->key_fingerprint === Settings::get('key_fingerprint'),
-            'detail' => 'key fingerprint ' . ($backup->key_fingerprint ?: 'unknown'),
+            'ok' => $keyFingerprintOk,
+            'detail' => $currentKeyFingerprint === null
+                ? 'current key fingerprint is not recorded; run Verify to refresh it'
+                : 'archive key ' . ($backup->key_fingerprint ?: 'unknown')
+                    . '; current key ' . $currentKeyFingerprint,
         ];
         $manifest = $this->manifestSidecar($backup);
         $checks[] = [
@@ -794,6 +801,24 @@ class BackupRestoreController
 
         return $row->retention_class === 'checkpoint'
             || str_starts_with((string) $row->path, $checkpointRoot);
+    }
+
+    /** Read the worker's recorded active key fingerprint, not plugin UI settings. */
+    private function workerKeyFingerprint(): ?string
+    {
+        try {
+            $stored = DB::table('br_settings')->where('key', 'key_fingerprint')->value('value');
+        } catch (\Throwable) {
+            return null;
+        }
+        if (! is_string($stored) || $stored === '') {
+            return null;
+        }
+
+        $decoded = json_decode($stored, true);
+        $fingerprint = is_string($decoded) ? $decoded : $stored;
+
+        return $fingerprint !== '' ? $fingerprint : null;
     }
 
     private function storageSnapshot(): array
