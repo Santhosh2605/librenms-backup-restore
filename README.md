@@ -227,6 +227,8 @@ sudo -u librenms /opt/librenms/validate.php
 These are the restore steps for the fix after updating. Do not copy the old
 patched files from `SAVE` onto a newer LibreNMS version. If patch preparation
 or the dry run fails, stop; the patch needs review for the updated version.
+For common command and validation errors, see the
+[LibreNMS validator patch troubleshooting guide](docs/LIBRENMS-VALIDATOR-TROUBLESHOOTING.md).
 
 ## What it does
 
@@ -307,6 +309,7 @@ it deliberately does *not* protect against.
 |---|---|
 | [INSTALL.md](docs/INSTALL.md) | Requirements, installer, keys, verification, troubleshooting table |
 | [LIBRENMS-VALIDATOR-PATCH.md](docs/LIBRENMS-VALIDATOR-PATCH.md) | Prepare, review, and apply the optional LibreNMS schema-validator compatibility patch |
+| [LIBRENMS-VALIDATOR-TROUBLESHOOTING.md](docs/LIBRENMS-VALIDATOR-TROUBLESHOOTING.md) | Troubleshoot patch bundle paths, apply errors, and validation results |
 | [RESTORE.md](docs/RESTORE.md) | Restore runbook, rehearsal checklist, manual recovery, rollback |
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
