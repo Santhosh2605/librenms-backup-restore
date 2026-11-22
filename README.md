@@ -146,100 +146,32 @@ LibreNMS will warn that these core files are locally modified. **Do not run
 
 #### Updating LibreNMS later
 
-Keep the timestamped bundle from the preparer. It contains the original core
-files and the patch. Before updating, select the bundle that matches the
-currently applied patch, then back up the currently working patch, restore the
-original core files, and move the helper and manifest out of LibreNMS:
-
-```bash
-set -euo pipefail
-PROJECT=/opt/librenms-backup-restore
-LIBRENMS=/opt/librenms
-BUNDLE=$(find "$PROJECT/plugin/support/librenms-validator" -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
-test -n "$BUNDLE" || { echo "Validator patch bundle not found"; exit 1; }
-printf 'Using bundle: %s\n' "$BUNDLE"
-SAVE="$PROJECT/plugin/support/librenms-validator/update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
-sudo install -d -m 0700 "$SAVE"
-find "$BUNDLE/backup" -type f -print0 | while IFS= read -r -d '' ORIGINAL; do
-  RELATIVE_PATH=${ORIGINAL#"$BUNDLE/backup/"}
-  CURRENT="$LIBRENMS/$RELATIVE_PATH"
-  test -f "$CURRENT" || { echo "Expected patched file is missing: $CURRENT"; exit 1; }
-  sudo install -D -m 0600 "$CURRENT" "$SAVE/$RELATIVE_PATH" || exit 1
-done || { echo "Could not save current patched files; stop before updating LibreNMS"; exit 1; }
-sudo cp -a "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
-sudo cp -a "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
-BACKUP_DIR="$BUNDLE/backup"
-test -d "$BACKUP_DIR" || { echo "Original files not found in selected bundle"; exit 1; }
-find "$BACKUP_DIR" -type f -print -quit | grep -q . || { echo "Bundle contains no original files"; exit 1; }
-set -o pipefail
-find "$BACKUP_DIR" -type f -print0 | while IFS= read -r -d '' SOURCE; do
-  RELATIVE_PATH=${SOURCE#"$BACKUP_DIR/"}
-  sudo install -D -o librenms -g librenms -m 0644 "$SOURCE" "$LIBRENMS/$RELATIVE_PATH" || exit 1
-done || { echo "Failed to restore original files; stop before updating LibreNMS"; exit 1; }
-if grep -q PluginSchema "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php"; then
-  echo "Original validator was not restored; stop before updating LibreNMS"
-  exit 1
-fi
-sudo mv "$LIBRENMS/LibreNMS/DB/PluginSchema.php" "$SAVE/"
-sudo mv "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json" "$SAVE/"
-sudo -u librenms git -C "$LIBRENMS" status --short
-```
-
-Confirm the three validator files no longer appear as modified. If any local
-LibreNMS files remain listed, stop and review them before updating. The `SAVE`
-directory contains the working patch files in case you need to restore them.
-If the update advances LibreNMS to a new revision, do not copy these old files
-back over it; regenerate and review the patch for the new version.
-
-Then update:
-
-```bash
-cd /opt/librenms
-sudo -u librenms ./daily.sh
-```
-
-The helper is deliberately kept in `SAVE`; do not restore that old helper
-over the updated LibreNMS tree. Restore the plugin schema manifest from the
-saved copy after the update:
-
-```bash
-sudo install -o librenms -g librenms -m 0644 \
-  "$SAVE/librenms-schema.json" \
-  "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json"
-```
-
-After the update, generate a **new** patch against the updated LibreNMS files:
+Use the two scripts in order. The first script finds the bundle matching the
+currently applied patch, saves the patched files and plugin manifest, restores
+the original LibreNMS files, and runs LibreNMS's normal `daily.sh` update. It
+stops without updating if it cannot match the installed patch to a saved bundle.
 
 ```bash
 cd /opt/librenms-backup-restore
-sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/librenms
+sudo bash scripts/pre-update-librenms-validator.sh
 ```
 
-Select the newly generated bundle, review the patch, then dry-run it:
+After `daily.sh` completes, run the second script. It prepares a new patch
+against the updated LibreNMS files, dry-runs it, applies it only if the dry run
+passes, and restores the saved plugin manifest. It also fixes the new helper's
+ownership.
 
 ```bash
-NEW_BUNDLE=$(find /opt/librenms-backup-restore/plugin/support/librenms-validator -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
-test -n "$NEW_BUNDLE" && test -f "$NEW_BUNDLE/librenms-validator-fix.patch" || { echo "New validator patch bundle not found"; exit 1; }
-printf 'Using new bundle: %s\n' "$NEW_BUNDLE"
-PATCH="$NEW_BUNDLE/librenms-validator-fix.patch"
-sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
+sudo bash scripts/post-update-librenms-validator.sh
 ```
 
-If every file passes, reapply the fix to the updated core and restore the
-manifest:
-
-```bash
-sudo patch -p1 -d /opt/librenms < "$PATCH"
-sudo install -o librenms -g librenms -m 0644 \
-  /opt/librenms-backup-restore/plugin/librenms-schema.json \
-  /opt/librenms/app/Plugins/BackupRestore/librenms-schema.json
-sudo chown librenms:librenms /opt/librenms/LibreNMS/DB/PluginSchema.php
-sudo -u librenms /opt/librenms/validate.php
-```
-
-These are the restore steps for the fix after updating. Do not copy the old
-patched files from `SAVE` onto a newer LibreNMS version. If patch preparation
-or the dry run fails, stop; the patch needs review for the updated version.
+The scripts keep a timestamped backup and a compressed copy under
+`plugin/support/librenms-validator/update-backups/`. They never copy an old
+patched LibreNMS file over a newer LibreNMS version. If patch preparation or
+the dry run fails, the post-update script stops and leaves the new patch bundle
+for review. If the pre-update script reports that `daily.sh` failed, resolve
+the reported update issue and run the post-update script; it retries `daily.sh`
+before preparing the new patch. Run validation afterward and decline automatic database repairs.
 For common command and validation errors, see the
 [LibreNMS validator patch troubleshooting guide](docs/LIBRENMS-VALIDATOR-TROUBLESHOOTING.md).
 

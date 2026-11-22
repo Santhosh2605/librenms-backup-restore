@@ -71,16 +71,13 @@ grep -n PluginSchema /opt/librenms/LibreNMS/Validations/Database/CheckSchemaColl
 ls -l /opt/librenms/LibreNMS/DB/PluginSchema.php
 ```
 
-For a normal LibreNMS update, restore the original validator files from the
-matching bundle before running `daily.sh`. The README's restore block locates
-all original files under the bundle's `backup/` folder, restores them while
-preserving their LibreNMS paths, and automatically stops if the restored
-collation validator still references `PluginSchema`. After the update, prepare
-and review a new patch, dry-run it, apply it, and install the manifest as
-described in the README. Do not copy an old helper or old patched validator
-files over a newer LibreNMS version. If the matching original files or bundle
-are unavailable, stop and recover them from the saved update backup or bundle
-before proceeding.
+For a normal LibreNMS update, use the two scripts documented in the README.
+The pre-update script matches the installed patch against saved bundles, backs
+up the patched files, restores the originals, checks the restored files, and
+then runs `daily.sh`. The post-update script prepares a patch for the new core,
+dry-runs and applies it, and restores the saved plugin manifest. Do not copy an
+old helper or old patched validator files over a newer LibreNMS version. If a
+script stops, follow its error message and keep the update backup for recovery.
 
 ## Validation again reports the plugin's `br_*` tables or JSON columns
 

@@ -38,3 +38,6 @@ For the step-by-step update and reapply procedure, see the README section
 “Updating LibreNMS later.” If a command or validation result differs from the
 expected output, see
 [LIBRENMS-VALIDATOR-TROUBLESHOOTING.md](LIBRENMS-VALIDATOR-TROUBLESHOOTING.md).
+The update procedure uses `scripts/pre-update-librenms-validator.sh` and
+`scripts/post-update-librenms-validator.sh` so users do not need to manually
+select bundle timestamps or restore individual core files.
