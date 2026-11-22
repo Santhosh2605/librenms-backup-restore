@@ -13,7 +13,7 @@ namespace App\Plugins\BackupRestore\Services;
  */
 final class Version
 {
-    public const VERSION = '1.0.2';
+    public const VERSION = '1.0.3';
     public const NAME = 'BackupRestore';
     public const TITLE = 'Backup & Restore';
 

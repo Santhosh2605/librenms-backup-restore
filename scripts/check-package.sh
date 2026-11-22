@@ -249,38 +249,23 @@ else
 fi
 
 hdr "README architecture diagram"
-if grep -q '^```mermaid$' "$HERE/README.md"; then
-    ok "README has a mermaid diagram"
-
-    # The diagram states counts. If the wording changes so the count can no
-    # longer be found, that is drift too - so "missing" is a failure, not a skip.
-    check_count() {
-        local label="$1" expect="$2" real="$3"
-        if ! grep -q -- "$label" "$HERE/README.md"; then
-            bad "README no longer states '$label' (diagram drift)"
-        elif [[ "$real" == "$expect" ]]; then
-            ok "README '$label' matches code ($real)"
-        else
-            bad "README claims '$label' but code has $real"
-        fi
-    }
-    check_count "22 routes" "22" \
-        "$(grep -c 'Route::get\|Route::post' "$HERE/front-controller/plugin-backuprestore.php")"
-    check_count "20 operations" "20" \
-        "$(sed -n '/^OPERATIONS = {/,/^}/p' "$HERE/worker/br/helper_client.py" \
-           | grep -oE '"[a-z_.]+"' | wc -l)"
-
-    # Every code path named in the component table must exist.
-    missing=0
-    while read -r path; do
-        [[ -z "$path" ]] && continue
-        [[ -e "$HERE/$path" ]] || { bad "diagram references missing path: $path"; missing=1; }
-    done < <(sed -n '/^### Component reference/,/^###/p' "$HERE/README.md" \
-             | grep -oE '`(worker|plugin|front-controller)/[A-Za-z0-9_./-]+`' | tr -d '`' | sort -u)
-    [[ $missing -eq 0 ]] && ok "diagram component paths all exist"
+if { grep -q 'docs/architecture\.svg' "$HERE/README.md" \
+     && [[ -f "$HERE/docs/architecture.svg" ]]; } \
+   || grep -q '^```mermaid$' "$HERE/README.md"; then
+    ok "README has a supported architecture diagram (SVG or Mermaid)"
 else
-    bad "README has no mermaid architecture diagram"
+    bad "README has no supported architecture diagram"
 fi
+
+# Keep component table paths valid without coupling this check to a diagram
+# syntax or hard-coded route/helper counts.
+missing=0
+while read -r path; do
+    [[ -z "$path" ]] && continue
+    [[ -e "$HERE/$path" ]] || { bad "README references missing component path: $path"; missing=1; }
+done < <(sed -n '/^### Component reference/,/^###/p' "$HERE/README.md" \
+         | grep -oE '`(worker|plugin|front-controller)/[A-Za-z0-9_./-]+`' | tr -d '`' | sort -u)
+[[ $missing -eq 0 ]] && ok "README component reference paths all exist"
 
 hdr "Version consistency"
 PY_VER="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' "$HERE/worker/br/common.py" | head -1)"

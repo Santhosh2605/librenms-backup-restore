@@ -21,7 +21,7 @@ import typing as t
 # Constants
 # ---------------------------------------------------------------------------
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 MANIFEST_NAME = "manifest.json"
 CHECKSUM_NAME = "checksums.sha256"

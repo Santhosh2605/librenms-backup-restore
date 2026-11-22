@@ -214,9 +214,19 @@ chmod 0640 "$CONF_DIR/br.conf"
 # ---------------------------------------------------------------------------
 step "5. Encryption key material (AES-256 + HMAC-SHA256)"
 # ---------------------------------------------------------------------------
-# New backups use the passphrase-based AES container. Keep any existing age
-# identity/recipients in place so older archives remain restorable.
-sed -i 's/^encryption .*/encryption         = aes256-ctr-hmac-sha256/' "$CONF_DIR/br.conf"
+# New backups use the passphrase-based AES container. Update existing configs
+# even when spacing differs, and add the setting if an older config omitted it.
+if grep -Eq '^[[:space:]]*encryption[[:space:]]*=' "$CONF_DIR/br.conf"; then
+    sed -i -E 's/^[[:space:]]*encryption[[:space:]]*=.*/encryption         = aes256-ctr-hmac-sha256/' \
+        "$CONF_DIR/br.conf"
+elif grep -q '^\[archive\][[:space:]]*$' "$CONF_DIR/br.conf"; then
+    sed -i '/^\[archive\][[:space:]]*$/a encryption         = aes256-ctr-hmac-sha256' \
+        "$CONF_DIR/br.conf"
+else
+    die "[archive] section missing from $CONF_DIR/br.conf; cannot set AES encryption"
+fi
+grep -Eq '^[[:space:]]*encryption[[:space:]]*=[[:space:]]*aes256-ctr-hmac-sha256[[:space:]]*$' \
+    "$CONF_DIR/br.conf" || die "failed to configure AES-256 + HMAC-SHA256 in br.conf"
 if [[ ! -f "$KEY_DIR/passphrase" ]]; then
     ( umask 077; head -c 48 /dev/urandom | base64 | tr -d '\n' > "$KEY_DIR/passphrase" )
     echo >> "$KEY_DIR/passphrase"

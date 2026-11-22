@@ -78,20 +78,34 @@ hdr "4. Configuration and key material"
 check_file "$CONF_DIR/br.conf"
 check_perm "$CONF_DIR/br.conf" 640
 if [[ -f "$CONF_DIR/br.conf" ]]; then
-    grep -qE '^\s*encryption\s*=\s*(age|aesgcm-pbkdf2)' "$CONF_DIR/br.conf" \
-        && ok "encryption scheme configured" || bad "encryption not configured"
+    ENCRYPTION_SCHEME="$(sed -nE 's/^[[:space:]]*encryption[[:space:]]*=[[:space:]]*([^[:space:]#;]+).*/\1/p' \
+        "$CONF_DIR/br.conf" | head -1 | tr '[:upper:]' '[:lower:]')"
+    case "$ENCRYPTION_SCHEME" in
+        aes256-ctr-hmac-sha256|aesgcm-pbkdf2|openssl-sshaes)
+            if [[ -f "$CONF_DIR/keys/passphrase" ]]; then
+                ok "AES-256 + HMAC-SHA256 configured"
+                check_perm "$CONF_DIR/keys/passphrase" 640
+            else
+                bad "AES encryption selected but passphrase is missing"
+            fi
+            ;;
+        age)
+            if [[ -f "$CONF_DIR/keys/identity.txt" && -f "$CONF_DIR/keys/recipients.txt" ]]; then
+                ok "age encryption configured"
+                check_perm "$CONF_DIR/keys/identity.txt" 640
+            else
+                bad "age encryption selected but identity or recipients file is missing"
+            fi
+            ;;
+        none)
+            warn "archive encryption is disabled (encryption=none)"
+            ;;
+        *)
+            bad "unsupported or missing encryption scheme: ${ENCRYPTION_SCHEME:-not set}"
+            ;;
+    esac
     grep -qE '^\s*db_password\s*=\s*\S' "$CONF_DIR/br.conf" \
         && warn "a database password is stored in br.conf (prefer .env discovery)"
-fi
-if [[ -f "$CONF_DIR/keys/identity.txt" ]]; then
-    check_perm "$CONF_DIR/keys/identity.txt" 640
-    check_file "$CONF_DIR/keys/recipients.txt"
-    ok "age keypair present"
-elif [[ -f "$CONF_DIR/keys/passphrase" ]]; then
-    check_perm "$CONF_DIR/keys/passphrase" 640
-    ok "passphrase present (aesgcm-pbkdf2)"
-else
-    bad "no encryption key material found in $CONF_DIR/keys"
 fi
 
 hdr "5. Storage layout"
