@@ -3,6 +3,14 @@
 All notable changes to this project. Format follows Keep a Changelog; versions
 use semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+
+- `scripts/upgrade.sh` now stages its source when run from the installed project
+  directory, so rotating that directory to `.previous` cannot hide `install.sh`
+  before the upgrade starts.
+
 ## [1.0.2] — 2026-11-11
 
 ### Fixed — user and path overrides were silently ignored
