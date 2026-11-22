@@ -115,10 +115,14 @@ sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/li
 The command prints a timestamped bundle directory under
 `plugin/support/librenms-validator/`. Review its `README.txt`, saved files in
 `backup/`, patched copies in `patched/`, and `librenms-validator-fix.patch`.
-Replace `<timestamp>` below with the directory name printed by the command:
+Select the newest generated bundle automatically:
 
 ```bash
-PATCH="/opt/librenms-backup-restore/plugin/support/librenms-validator/<timestamp>/librenms-validator-fix.patch"
+PROJECT=/opt/librenms-backup-restore
+BUNDLE=$(find "$PROJECT/plugin/support/librenms-validator" -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
+test -n "$BUNDLE" && test -f "$BUNDLE/librenms-validator-fix.patch" || { echo "Validator patch bundle not found"; exit 1; }
+printf 'Using bundle: %s\n' "$BUNDLE"
+PATCH="$BUNDLE/librenms-validator-fix.patch"
 sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
 ```
 
@@ -143,14 +147,16 @@ LibreNMS will warn that these core files are locally modified. **Do not run
 #### Updating LibreNMS later
 
 Keep the timestamped bundle from the preparer. It contains the original core
-files and the patch. Before updating, replace `<timestamp>` below with that
-bundle's name, then back up the currently working patch, restore the original
-core files, and move the helper and manifest out of LibreNMS:
+files and the patch. Before updating, select the bundle that matches the
+currently applied patch, then back up the currently working patch, restore the
+original core files, and move the helper and manifest out of LibreNMS:
 
 ```bash
 PROJECT=/opt/librenms-backup-restore
 LIBRENMS=/opt/librenms
-BUNDLE="$PROJECT/plugin/support/librenms-validator/<timestamp>"
+BUNDLE=$(find "$PROJECT/plugin/support/librenms-validator" -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
+test -n "$BUNDLE" || { echo "Validator patch bundle not found"; exit 1; }
+printf 'Using bundle: %s\n' "$BUNDLE"
 SAVE="$PROJECT/plugin/support/librenms-validator/update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 sudo install -d -m 0700 "$SAVE"
 sudo cp -a "$LIBRENMS/LibreNMS/Validations/Database/CheckSchemaCollation.php" "$SAVE/"
@@ -179,6 +185,16 @@ cd /opt/librenms
 sudo -u librenms ./daily.sh
 ```
 
+The helper is deliberately kept in `SAVE`; do not restore that old helper
+over the updated LibreNMS tree. Restore the plugin schema manifest from the
+saved copy after the update:
+
+```bash
+sudo install -o librenms -g librenms -m 0644 \
+  "$SAVE/librenms-schema.json" \
+  "$LIBRENMS/app/Plugins/BackupRestore/librenms-schema.json"
+```
+
 After the update, generate a **new** patch against the updated LibreNMS files:
 
 ```bash
@@ -186,11 +202,12 @@ cd /opt/librenms-backup-restore
 sudo python3 scripts/prepare_librenms_validator_patch.py --librenms-root /opt/librenms
 ```
 
-Set `NEW_BUNDLE` to the timestamped directory printed by the command. Review
-the patch, then dry-run it:
+Select the newly generated bundle, review the patch, then dry-run it:
 
 ```bash
-NEW_BUNDLE="/opt/librenms-backup-restore/plugin/support/librenms-validator/<new timestamp>"
+NEW_BUNDLE=$(find /opt/librenms-backup-restore/plugin/support/librenms-validator -mindepth 1 -maxdepth 1 -type d -name '????????T??????Z' -print | sort | tail -n 1)
+test -n "$NEW_BUNDLE" && test -f "$NEW_BUNDLE/librenms-validator-fix.patch" || { echo "New validator patch bundle not found"; exit 1; }
+printf 'Using new bundle: %s\n' "$NEW_BUNDLE"
 PATCH="$NEW_BUNDLE/librenms-validator-fix.patch"
 sudo patch --dry-run -p1 -d /opt/librenms < "$PATCH"
 ```
