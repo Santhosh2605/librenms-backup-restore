@@ -118,9 +118,104 @@ If the menu item does not appear, refresh LibreNMS's cached plugin list:
 sudo -u librenms php /opt/librenms/artisan config:clear
 ```
 
-For custom users, configuration options, and troubleshooting, see the
-[installation reference](docs/INSTALL.md). For restore and recovery instructions,
-see [RESTORE.md](docs/RESTORE.md).
+For restore and recovery instructions, see [RESTORE.md](docs/RESTORE.md).
+
+### Installation reference
+
+#### Requirements
+
+The installer targets Ubuntu 26.04 with PHP 8.5 and is also validated on Debian
+13 with PHP 8.4. The server needs LibreNMS, Python 3.11 or newer, PHP 8.2 or
+newer, MariaDB 10.6 or newer, systemd 245 or newer, and `zstd`. Install the
+required packages on Ubuntu or Debian with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git python3 python3-pymysql python3-cryptography \
+                        zstd mariadb-client rsync acl
+```
+
+#### Download archives
+
+The ZIP and release tarball download steps are described above. GitHub ZIPs
+extract to a folder ending in `-main` and do not preserve executable bits; run
+`chmod +x scripts/*.sh` after extracting and before running scripts directly.
+Release tarballs use a versioned filename and folder.
+
+#### Ubuntu 26.04 sudo compatibility
+
+Ubuntu 26.04 uses sudo-rs, which rejects some sudoers `Defaults` options. The
+installer validates its policy before installing it and falls back to a minimal
+policy if needed. To check the system manually, run:
+
+```bash
+sudo -V | head -2
+sudo visudo -c -f /etc/sudoers.d/librenms-backup
+```
+
+`sudo-rs` in the version output is expected on Ubuntu 26.04.
+
+#### Configure and protect the encryption key
+
+The installer creates `/etc/librenms-backup/br.conf` and does not overwrite an
+existing configuration. It defaults to AES-256 encryption authenticated with
+HMAC-SHA256 and `zstd` compression. To change settings, edit that file as root;
+for example, set `librenms_root` under `[general]`, `compression` under
+`[archive]`, or disable RRD collection under `[components]`. Do not put secrets
+in `br.conf`.
+
+The generated passphrase is stored at
+`/etc/librenms-backup/keys/passphrase`. Keep it in secure offline storage; it is
+needed to decrypt backups after a server loss. Keep the matching `identity.txt`
+too if you have older `age`-encrypted archives. Never replace a key used by
+existing backups.
+
+#### Ownership and web upload limits
+
+The code under `/opt/librenms-backup-restore` is root-owned so the worker cannot
+change its own code. The installer manages the remaining owners and permissions:
+the worker runs as `librenms`, while PHP-FPM receives write access only to the
+archive upload intake folder. The web account defaults to `www-data`; for a
+different PHP-FPM account, install with:
+
+```bash
+sudo WEB_USER=<php-fpm-user> bash scripts/install.sh
+```
+
+For uploads larger than the PHP defaults, raise `upload_max_filesize` and
+`post_max_size` above your largest archive (the plugin limit is 50 GiB). If
+nginx fronts PHP-FPM, also raise `client_max_body_size`, then restart PHP-FPM
+and the web server.
+
+#### Start and verify services
+
+The installer enables the helper and background timers. Check them and run the
+installation validator with:
+
+```bash
+sudo systemctl status br-helper.service --no-pager
+sudo systemctl list-timers 'librenms-backup-*'
+sudo bash /opt/librenms-backup-restore/scripts/validate-install.sh
+```
+
+The plugin dashboard should report `helper: reachable`. If the menu is missing,
+clear LibreNMS's cached plugin list using the command in the setup steps above.
+
+#### Troubleshooting
+
+| Symptom | Suggested check or fix |
+|---|---|
+| `helper: unreachable` | Restart `br-helper.service`; check permissions under `/run/librenms-backup/`. |
+| Jobs stay `queued` | Check `systemctl list-timers` and `journalctl -u librenms-backup-dispatch`. |
+| `Can't create TCP/IP socket` during restore | Confirm `/run/mysqld/mysqld.sock` exists; the helper uses the local socket. |
+| Plugin page or assets return 404 | Confirm `html/plugin-backuprestore.php` was installed and clear the LibreNMS config cache. |
+| `Data too long for column 'retention_class'` | Run `sudo -u librenms php /opt/librenms-backup-restore/scripts/br-schema.php install`. |
+| Restore fails at `RESTORING_DATABASE` | Review the restore `job.log` and verify the archive using the deep verification level. |
+
+Logs are under `/var/log/librenms-backup/`; helper logs are available with
+`sudo journalctl -u br-helper`. To uninstall while keeping archives and
+configuration, run `sudo bash /opt/librenms-backup-restore/scripts/uninstall.sh`.
+Add `--purge` only when you also want its data and configuration removed.
 
 ### Optional: LibreNMS database-validator compatibility patch
 
@@ -277,14 +372,12 @@ it deliberately does *not* protect against.
 
 | Document | Contents |
 |---|---|
-| [INSTALL.md](docs/INSTALL.md) | Requirements, installer, keys, verification, troubleshooting table |
 | [LIBRENMS-VALIDATOR-PATCH.md](docs/LIBRENMS-VALIDATOR-PATCH.md) | Prepare, review, and apply the optional LibreNMS schema-validator compatibility patch |
 | [LIBRENMS-VALIDATOR-TROUBLESHOOTING.md](docs/LIBRENMS-VALIDATOR-TROUBLESHOOTING.md) | Troubleshoot patch bundle paths, apply errors, and validation results |
 | [RESTORE.md](docs/RESTORE.md) | Restore runbook, rehearsal checklist, manual recovery, rollback |
 | [SECURITY.md](docs/SECURITY.md) | Privilege model, helper protocol, secret handling, threat boundaries |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, routes, data model, pipelines, failure modes |
 | [SCHEDULER.md](docs/SCHEDULER.md) | Timers, job lifecycle, GFS retention |
-| [STATUS.md](docs/STATUS.md) | Current build status by phase |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Release notes and known limitations |
 
 ## Testing
