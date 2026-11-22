@@ -28,6 +28,13 @@ again restores its deleted history entry after the archive is verified. The
 server rejects the upload if a live backup record or archive file with that
 backup ID still exists.
 
+If restore preflight reports a key fingerprint that is unknown or out of date,
+run **Verify** for that archive and open preflight again. A successful verify
+records the active worker key fingerprint. If the archive and current key
+fingerprints still differ, restore is refused; restore only after the original
+key material has been restored. The worker independently checks the key before
+it changes the system.
+
 ## Rehearse first
 
 The rehearsal is the same code path as the real thing, on a disposable target.

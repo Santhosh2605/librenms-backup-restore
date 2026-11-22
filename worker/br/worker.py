@@ -308,6 +308,11 @@ class Worker:
                 f"mismatched={result['mismatched'][:5]} missing={result['missing'][:5]}"
             ),
         )
+        if ok:
+            try:
+                self.store.setting_set("key_fingerprint", crypto.key_fingerprint(self.cfg))
+            except Exception as exc:  # noqa: BLE001 - verification remains valid if this hint cannot be stored
+                self.log.warn("could not refresh active key fingerprint", error=str(exc))
         self._progress(job_id, 100, "DONE", f"verification {'passed' if ok else 'FAILED'}")
         self._finish(job_id, "completed" if ok else "failed",
                      error=None if ok else "checksum mismatch")
